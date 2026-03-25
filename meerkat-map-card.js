@@ -94,8 +94,8 @@ class MeerkatMapCard extends HTMLElement {
     this._poiDebounce   = null;
     this._mapInitialised = false;
     this._mapCentredOnce = false;
-    this._config = MeerkatMapCard.getStubConfig();
-    this._poiFetching = {}; // per-category in-flight guard
+    this._config      = MeerkatMapCard.getStubConfig();
+    this._poiFetching = {};
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ class MeerkatMapCard extends HTMLElement {
     if (this._mapInitialised) {
       this._applyTheme();
       this._updateMap();
-      this._loadAllPOIs(); // re-apply any toggled POI categories
+      this._loadAllPOIs();
     }
   }
 
@@ -321,6 +321,8 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
+        // Load POIs once map is sized — independent of person tracking
+        setTimeout(() => this._loadAllPOIs(), 500);
       });
 
     } catch (e) {
@@ -345,11 +347,10 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._mapCentredOnce) {
       this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
       this._mapCentredOnce = true;
-      // Load POIs once after initial centre (moveend fires too)
-      setTimeout(() => this._loadAllPOIs(), 300);
     }
 
     this._updatePersonMarker(state, lat, lng);
+    // POIs are loaded independently from _initMap and moveend — not here
   }
 
   // ── Person marker ─────────────────────────────────────────────────
@@ -464,7 +465,7 @@ class MeerkatMapCard extends HTMLElement {
     const key = `v9:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(`${window.location.protocol === 'https:' ? 'https:' : 'http:'}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
+      const r  = await fetch(`${window.location.protocol==='https:'?'https:':'http:'}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
       const d  = await r.json();
       const a  = d.address || {};
       var houseNum = a.house_number || '';
@@ -748,12 +749,12 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   async _loadPOICategory(cat, s, w, n, e) {
-    if (this._poiFetching[cat.key]) return; // already in flight
+    if (this._poiFetching[cat.key]) return;
     this._poiFetching[cat.key] = true;
     try {
       const query  = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-      var _proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const url    = `${_proto}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+      var _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const url    = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
       const resp   = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data   = await resp.json();
