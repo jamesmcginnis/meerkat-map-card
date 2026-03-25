@@ -463,7 +463,6 @@ class MeerkatMapCard extends HTMLElement {
       const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18`, { headers: { 'Accept-Language': 'en', 'User-Agent': 'MeerkatMapCard/1.0' } });
       const d  = await r.json();
       const a  = d.address || {};
-      // Fallback: if OSM node lacks house_number tag, try display_name prefix
       let houseNum = a.house_number || '';
       if (!houseNum && d.display_name) {
         const seg = d.display_name.split(',')[0].trim();
@@ -778,6 +777,7 @@ class MeerkatMapCard extends HTMLElement {
 
     const markers = elements
       .map(el => {
+        // nodes have lat/lon directly; ways/relations get a center object
         const lat = el.lat ?? el.center?.lat;
         const lon = el.lon ?? el.center?.lon;
         if (lat == null || lon == null) return null;
