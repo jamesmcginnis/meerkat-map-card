@@ -94,6 +94,8 @@ class MeerkatMapCard extends HTMLElement {
     this._poiDebounce   = null;
     this._mapInitialised = false;
     this._mapCentredOnce = false;
+    // Always pre-populate so _loadAllPOIs never throws before setConfig is called
+    this._config = MeerkatMapCard.getStubConfig();
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -462,18 +464,32 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    const key = `v2:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    // v3: bump cache key whenever geocode logic changes
+    const key = `v3:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18`, { headers: { 'Accept-Language': 'en' } });
+      const r  = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18`,
+        { headers: { 'Accept-Language': 'en', 'User-Agent': 'MeerkatMapCard/1.0 (home-assistant-custom-card)' } }
+      );
       const d  = await r.json();
       const a  = d.address || {};
-      const streetLine = [a.house_number, a.road].filter(Boolean).join(' ');
+
+      // a.house_number is present only when OSM has the building tagged.
+      // Fallback: Nominatim's display_name often starts with the house number
+      // e.g. "23, High Street, Waltham, Lincolnshire, LN8 5QT, UK"
+      let houseNum = a.house_number || null;
+      if (!houseNum && d.display_name) {
+        const first = d.display_name.split(',')[0].trim();
+        if (/^\d+[A-Za-z]?$/.test(first)) houseNum = first;
+      }
+
+      const streetLine = [houseNum, a.road].filter(Boolean).join(' ');
       const parts = [
-        streetLine || null,
-        a.suburb || a.quarter || a.neighbourhood || null,
-        a.town || a.city || a.village || a.county || null,
-        a.postcode || null,
+        streetLine   || null,
+        a.suburb     || a.quarter || a.neighbourhood || null,
+        a.town       || a.city   || a.village       || a.county || null,
+        a.postcode   || null,
       ].filter(Boolean);
       const result = parts.join(', ') || d.display_name || 'Unknown location';
       this._geocodeCache[key] = result;
@@ -745,13 +761,14 @@ class MeerkatMapCard extends HTMLElement {
 
   async _loadPOICategory(cat, s, w, n, e) {
     try {
-      const query  = `[out:json][timeout:15];(${cat.overpass}(${s},${w},${n},${e}););out body;`;
+      const query  = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out body;`;
       const url    = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
       const resp   = await fetch(url);
+      if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
       const data   = await resp.json();
       this._renderPOILayer(cat, data.elements || []);
-    } catch (e) {
-      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
+    } catch (err) {
+      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, err);
     }
   }
 
@@ -776,7 +793,7 @@ class MeerkatMapCard extends HTMLElement {
     const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
 
     const markers = elements
-      .filter(el => el.lat && el.lon)
+      .filter(el => el.lat != null && el.lon != null)
       .map(el => {
         const m = L.marker([el.lat, el.lon], { icon: poiIcon });
         m.on('click', (ev) => {
