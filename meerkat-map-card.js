@@ -1,7 +1,7 @@
 /**
  * Meerkat Map Card
  * Home Assistant custom card — OpenStreetMap with person tracking,
- * * POI overlays and info popups.
+ * POI overlays and info popups.
  *
  * Repository: https://github.com/jamesmcginnis/meerkat-map-card
  */
@@ -320,7 +320,6 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
-        // Load POIs independently — not gated on person entity
         setTimeout(() => this._loadAllPOIs(), 600);
       });
 
@@ -349,7 +348,6 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     this._updatePersonMarker(state, lat, lng);
-    // POIs load independently via _initMap and moveend
   }
 
   // ── Person marker ─────────────────────────────────────────────────
@@ -460,7 +458,7 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    // Best source: HA companion geocoded sensor (has full address + house number)
+    // Prefer HA companion geocoded sensor — has full address inc. house number
     const geoEnt = this._config.geocoded_entity;
     if (geoEnt && this._hass && this._hass.states[geoEnt]) {
       const st = this._hass.states[geoEnt].state;
@@ -480,12 +478,8 @@ class MeerkatMapCard extends HTMLElement {
         if (/^[0-9]+[A-Za-z]?$/.test(seg)) houseNum = seg;
       }
       const street = [houseNum, a.road].filter(Boolean).join(' ');
-      const parts = [
-        street || null,
-        a.suburb || a.quarter || a.neighbourhood || null,
-        a.town || a.city || a.village || a.county || null,
-        a.postcode || null,
-      ].filter(Boolean);
+      const parts = [street||null, a.suburb||a.quarter||a.neighbourhood||null,
+        a.town||a.city||a.village||a.county||null, a.postcode||null].filter(Boolean);
       const result = parts.join(', ') || d.display_name || 'Unknown location';
       this._geocodeCache[key] = result;
       return result;
@@ -595,6 +589,7 @@ class MeerkatMapCard extends HTMLElement {
   }
 
 
+
   // ── POI loading ───────────────────────────────────────────────────
   async _loadAllPOIs() {
     if (!this._mapInitialised || !this._map) return;
@@ -620,8 +615,7 @@ class MeerkatMapCard extends HTMLElement {
 
   async _loadPOICategory(cat, s, w, n, e) {
     if (this._poiFetching[cat.key]) return;
-
-    // Step 1: show cached data instantly so map is never blank
+    // Show cached data instantly
     const cacheKey = this._poiCacheKey(cat, s, w, n, e);
     try {
       const cached = localStorage.getItem(cacheKey);
@@ -629,12 +623,11 @@ class MeerkatMapCard extends HTMLElement {
         const { ts, elements } = JSON.parse(cached);
         if (Date.now() - ts < 3600000) {
           this._renderPOILayer(cat, elements);
-          if (Date.now() - ts < 300000) return; // fresh enough, skip fetch
+          if (Date.now() - ts < 300000) return;
         }
       }
     } catch (_) {}
-
-    // Step 2: fetch fresh data in background
+    // Fetch fresh in background
     this._poiFetching[cat.key] = true;
     try {
       const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
@@ -671,7 +664,6 @@ class MeerkatMapCard extends HTMLElement {
 
     const markers = elements
       .map(el => {
-        // nodes have lat/lon; ways/relations have a center object
         var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
         var lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
         if (lat == null || lon == null) return null;
@@ -918,7 +910,7 @@ class MeerkatMapCardEditor extends HTMLElement {
               <select id="person_entity">${personOptions}</select>
             </div>
             <div class="select-row" style="margin-top:8px;">
-              <label style="font-size:12px;">Geocoded Location Sensor <span style="opacity:0.5;font-weight:400;">(optional — shows full address inc. house number)</span></label>
+              <label style="font-size:12px;">Geocoded Location Sensor <span style="opacity:0.5;font-weight:400;">(optional — full address inc. house number)</span></label>
               <select id="geocoded_entity">${geocodedOptions}</select>
             </div>
           </div>
@@ -998,13 +990,7 @@ class MeerkatMapCardEditor extends HTMLElement {
     });
 
     // Accent colour
-    const picker = root.getElementById('accent_color_picker');
-    const hexIn  = root.getElementById('accent_color');
-    picker.oninput = () => { hexIn.value = picker.value; this._updateConfig('accent_color', picker.value); };
-    hexIn.oninput  = () => {
-      const v = hexIn.value.trim();
-      if (/^#[0-9a-fA-F]{6}$/.test(v)) { picker.value = v; this._updateConfig('accent_color', v); }
-    };
+    // accent_color removed
   }
 
   _updateUI() {
@@ -1040,6 +1026,6 @@ if (!window.customCards.some(c => c.type === 'meerkat-map-card')) {
     type:        'meerkat-map-card',
     name:        'Meerkat Map Card',
     preview:     false,
-    description: 'Interactive OpenStreetMap card with person tracking, POI overlays, and info popups.',
+    description: 'Interactive OpenStreetMap card with person tracking, POI overlays, info popups, and Mapillary street view.',
   });
 }
