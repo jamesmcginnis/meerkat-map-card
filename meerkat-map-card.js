@@ -17,13 +17,14 @@ function _mmScript(url) {
   });
   return _mmCache[url];
 }
-function _mmCSS(url) {
-  const k = 'css:' + url;
-  if (_mmCache[k]) return;
-  _mmCache[k] = true;
-  const l = document.createElement('link');
-  l.rel = 'stylesheet'; l.href = url;
-  document.head.appendChild(l);
+// Fetch CSS text so it can be injected directly into a shadow root
+const _mmCSSText = {};
+async function _mmFetchCSS(url) {
+  if (_mmCSSText[url]) return _mmCSSText[url];
+  const r = await fetch(url);
+  const text = await r.text();
+  _mmCSSText[url] = text;
+  return text;
 }
 
 // ── POI Category Definitions ───────────────────────────────────────
@@ -134,7 +135,7 @@ class MeerkatMapCard extends HTMLElement {
     this._hass = hass;
     if (!this.shadowRoot.innerHTML) this._render();
     if (!this._mapInitialised)      this._initMap();
-    this._updateMap();
+    else                            this._updateMap();
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────
@@ -257,33 +258,47 @@ class MeerkatMapCard extends HTMLElement {
     this._mapIniting = true;
 
     try {
-      _mmCSS('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
-      await _mmScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+      // Load Leaflet JS and CSS in parallel.
+      // CSS MUST be injected into the shadow root — document.head styles
+      // do not pierce Shadow DOM, so tiles and layout would be broken.
+      const [leafletCSS] = await Promise.all([
+        _mmFetchCSS('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'),
+        _mmScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'),
+      ]);
 
-      const L       = window.L;
-      const mapEl   = this.shadowRoot.getElementById('mm-map');
+      // Inject Leaflet CSS directly into shadow root
+      if (!this.shadowRoot.getElementById('mm-leaflet-css')) {
+        const styleEl = document.createElement('style');
+        styleEl.id = 'mm-leaflet-css';
+        // Fix tile image paths — Leaflet CSS uses relative URLs for marker images
+        styleEl.textContent = leafletCSS.replace(
+          /url\(images\//g,
+          'url(https://unpkg.com/leaflet@1.9.4/dist/images/'
+        );
+        this.shadowRoot.insertBefore(styleEl, this.shadowRoot.firstChild);
+      }
+
+      const L     = window.L;
+      const mapEl = this.shadowRoot.getElementById('mm-map');
       if (!mapEl) { this._mapIniting = false; return; }
 
-      const isDark  = this._isDark();
-      const zoom    = parseInt(this._config.zoom_level) || 15;
+      const isDark = this._isDark();
+      const zoom   = parseInt(this._config.zoom_level) || 15;
 
       this._map = L.map(mapEl, {
-        zoomControl:      false,
+        zoomControl:        false,
         attributionControl: true,
-        center:           [51.5, -0.12],
+        center:             [51.5, -0.12],
         zoom,
+        preferCanvas:       true,
       });
 
       const tiles = isDark ? MM_TILES.dark : MM_TILES.light;
-      this._tileLayer = L.tileLayer(tiles.url, { attribution: tiles.attr, subdomains: 'abcd', maxZoom: 20 }).addTo(this._map);
-
-      // Attribution styling
-      const attrEl = this.shadowRoot.querySelector('.leaflet-attribution-container') || this.shadowRoot.querySelector('.leaflet-control-attribution');
-      if (attrEl) {
-        attrEl.style.cssText = `font-size:9px;padding:2px 6px;border-radius:6px 0 0 0;
-          background:${isDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)'};
-          color:${isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'}`;
-      }
+      this._tileLayer = L.tileLayer(tiles.url, {
+        attribution: tiles.attr,
+        subdomains:  'abcd',
+        maxZoom:     20,
+      }).addTo(this._map);
 
       this._mapInitialised = true;
       this._mapIniting     = false;
@@ -294,11 +309,17 @@ class MeerkatMapCard extends HTMLElement {
         this._poiDebounce = setTimeout(() => this._loadAllPOIs(), 800);
       });
 
-      // Hide loading
+      // Hide loading overlay
       const loadEl = this.shadowRoot.getElementById('mm-loading');
       if (loadEl) loadEl.style.display = 'none';
 
-      this._updateMap();
+      // Critical: tell Leaflet to recalculate its container size now that
+      // it is fully visible. Without this tiles only load in a small region.
+      requestAnimationFrame(() => {
+        this._map.invalidateSize({ animate: false });
+        this._updateMap();
+      });
+
     } catch (e) {
       console.error('[MeerkatMapCard] Map init failed:', e);
       this._mapIniting = false;
