@@ -457,13 +457,19 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const key = `v2:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
       const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, { headers: { 'Accept-Language': 'en' } });
       const d  = await r.json();
       const a  = d.address || {};
-      const parts = [a.road, a.suburb || a.quarter, a.town || a.city || a.village, a.country].filter(Boolean);
+      const streetLine = [a.house_number, a.road].filter(Boolean).join(' ');
+      const parts = [
+        streetLine || null,
+        a.suburb || a.quarter || a.neighbourhood || null,
+        a.town || a.city || a.village || a.county || null,
+        a.postcode || null,
+      ].filter(Boolean);
       const result = parts.join(', ') || d.display_name || 'Unknown location';
       this._geocodeCache[key] = result;
       return result;
