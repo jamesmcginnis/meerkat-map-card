@@ -29,18 +29,18 @@ async function _mmFetchCSS(url) {
 
 // ── POI Category Definitions ───────────────────────────────────────
 const MM_POIS = [
-  { key: 'show_shops',          label: 'Shops',           emoji: '🛍️',  color: '#FF9500', overpass: 'node["shop"]',                     icon: 'M19,6H17C17,3.24 14.76,1 12,1C9.24,1 7,3.24 7,6H5C3.9,6 3,6.9 3,8V20C3,21.1 3.9,22 5,22H19C20.1,22 21,21.1 21,20V8C21,6.9 20.1,6 19,6M12,3C13.66,3 15,4.34 15,6H9C9,4.34 10.34,3 12,3M19,20H5V8H19V20Z' },
-  { key: 'show_fuel',           label: 'Petrol Stations', emoji: '⛽',  color: '#FF3B30', overpass: 'node["amenity"="fuel"]',            icon: 'M9.5,6.5V11.5H7V4H13.5L14.5,8H18C19.1,8 20,8.9 20,10V14C20,15.1 19.1,16 18,16V20A2,2 0 0,1 16,22H6A2,2 0 0,1 4,20V6.5A2.5,2.5 0 0,1 6.5,4H9.5V6.5H7V11.5H9.5Z' },
-  { key: 'show_post_boxes',     label: 'Post Boxes',      emoji: '📮',  color: '#FF2D55', overpass: 'node["amenity"="post_box"]',       icon: 'M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z' },
-  { key: 'show_train_stations', label: 'Train Stations',  emoji: '🚆',  color: '#5856D6', overpass: 'node["railway"="station"]',        icon: 'M12,2C8,2 4,2.5 4,6V15.5C4,17.43 5.57,19 7.5,19L6,20.5V21H18V20.5L16.5,19C18.43,19 20,17.43 20,15.5V6C20,2.5 16,2 12,2M8,17A1.5,1.5 0 0,1 6.5,15.5A1.5,1.5 0 0,1 8,14A1.5,1.5 0 0,1 9.5,15.5A1.5,1.5 0 0,1 8,17M11,11H6V6H11V11M13,11V6H18V11H13M16,17A1.5,1.5 0 0,1 14.5,15.5A1.5,1.5 0 0,1 16,14A1.5,1.5 0 0,1 17.5,15.5A1.5,1.5 0 0,1 16,17Z' },
-  { key: 'show_bus_stops',      label: 'Bus Stops',       emoji: '🚌',  color: '#34C759', overpass: 'node["highway"="bus_stop"]',       icon: 'M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M18,11H6V6H18V11Z' },
-  { key: 'show_hospitals',      label: 'Hospitals',       emoji: '🏥',  color: '#FF3B30', overpass: 'node["amenity"="hospital"]',       icon: 'M18,14H14V18H10V14H6V10H10V6H14V10H18M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z' },
-  { key: 'show_pharmacies',     label: 'Pharmacies',      emoji: '💊',  color: '#5AC8FA', overpass: 'node["amenity"="pharmacy"]',       icon: 'M13,9H11V7H9V9H7V11H9V13H11V11H13M10,2A8,8 0 0,1 18,10A8,8 0 0,1 10,18A8,8 0 0,1 2,10A8,8 0 0,1 10,2M10,4A6,6 0 0,0 4,10A6,6 0 0,0 10,16A6,6 0 0,0 16,10A6,6 0 0,0 10,4Z' },
-  { key: 'show_atms',           label: 'ATMs',            emoji: '🏧',  color: '#FFCC00', overpass: 'node["amenity"="atm"]',            icon: 'M2,4V20H22V4H2M20,16H4V8H20V16M6,14H8V10H6V14M10,10H14V12H10V14H14V12H12V10H10Z' },
-  { key: 'show_restaurants',    label: 'Restaurants',     emoji: '🍴',  color: '#FF6B6B', overpass: 'node["amenity"="restaurant"]',     icon: 'M11,9H9V2H7V9H5V2H3V9C3,11.12 4.66,12.84 6.75,12.97V22H9.25V12.97C11.34,12.84 13,11.12 13,9V2H11V9M16,6V14H18.5V22H21V2C18.24,2 16,4.24 16,6Z' },
-  { key: 'show_supermarkets',   label: 'Supermarkets',    emoji: '🛒',  color: '#30D158', overpass: 'node["shop"="supermarket"]',       icon: 'M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M7,4V8H17V4H7M16,10A1,1 0 0,0 15,11A1,1 0 0,0 16,12A1,1 0 0,0 17,11A1,1 0 0,0 16,10M8,11A1,1 0 0,0 9,12A1,1 0 0,0 10,11A1,1 0 0,0 9,10A1,1 0 0,0 8,11M12,10A1,1 0 0,0 11,11A1,1 0 0,0 12,12A1,1 0 0,0 13,11A1,1 0 0,0 12,10Z' },
-  { key: 'show_schools',        label: 'Schools',         emoji: '🏫',  color: '#BF5AF2', overpass: 'node["amenity"="school"]',         icon: 'M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z' },
-  { key: 'show_parks',          label: 'Parks',           emoji: '🌳',  color: '#32D74B', overpass: 'node["leisure"="park"]',           icon: 'M11,18L13,16.84V15H11C9.9,15 9,14.1 9,13C9,11.9 9.9,11 11,11H12V10.85L12.5,9H11C8.24,9 6,11.24 6,14C6,16.76 8.24,19 11,19V18M12.5,5L11,9H13L12,13H14L15.5,9H13.5L15,5H12.5M18,12C18,14.76 15.76,17 13,17V18.91C17,18.43 20,15.07 20,11C20,6.93 17,3.57 13,3.09V5C15.76,5 18,7.24 18,10V12Z' },
+  { key: 'show_shops',          label: 'Shops',           emoji: '🛍️',  color: '#FF9500', overpass: 'nwr["shop"]',                     icon: 'M19,6H17C17,3.24 14.76,1 12,1C9.24,1 7,3.24 7,6H5C3.9,6 3,6.9 3,8V20C3,21.1 3.9,22 5,22H19C20.1,22 21,21.1 21,20V8C21,6.9 20.1,6 19,6M12,3C13.66,3 15,4.34 15,6H9C9,4.34 10.34,3 12,3M19,20H5V8H19V20Z' },
+  { key: 'show_fuel',           label: 'Petrol Stations', emoji: '⛽',  color: '#FF3B30', overpass: 'nwr["amenity"="fuel"]',            icon: 'M9.5,6.5V11.5H7V4H13.5L14.5,8H18C19.1,8 20,8.9 20,10V14C20,15.1 19.1,16 18,16V20A2,2 0 0,1 16,22H6A2,2 0 0,1 4,20V6.5A2.5,2.5 0 0,1 6.5,4H9.5V6.5H7V11.5H9.5Z' },
+  { key: 'show_post_boxes',     label: 'Post Boxes',      emoji: '📮',  color: '#FF2D55', overpass: 'nwr["amenity"="post_box"]',       icon: 'M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z' },
+  { key: 'show_train_stations', label: 'Train Stations',  emoji: '🚆',  color: '#5856D6', overpass: 'nwr["railway"="station"]',        icon: 'M12,2C8,2 4,2.5 4,6V15.5C4,17.43 5.57,19 7.5,19L6,20.5V21H18V20.5L16.5,19C18.43,19 20,17.43 20,15.5V6C20,2.5 16,2 12,2M8,17A1.5,1.5 0 0,1 6.5,15.5A1.5,1.5 0 0,1 8,14A1.5,1.5 0 0,1 9.5,15.5A1.5,1.5 0 0,1 8,17M11,11H6V6H11V11M13,11V6H18V11H13M16,17A1.5,1.5 0 0,1 14.5,15.5A1.5,1.5 0 0,1 16,14A1.5,1.5 0 0,1 17.5,15.5A1.5,1.5 0 0,1 16,17Z' },
+  { key: 'show_bus_stops',      label: 'Bus Stops',       emoji: '🚌',  color: '#34C759', overpass: 'nwr["highway"="bus_stop"]',       icon: 'M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M18,11H6V6H18V11Z' },
+  { key: 'show_hospitals',      label: 'Hospitals',       emoji: '🏥',  color: '#FF3B30', overpass: 'nwr["amenity"="hospital"]',       icon: 'M18,14H14V18H10V14H6V10H10V6H14V10H18M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z' },
+  { key: 'show_pharmacies',     label: 'Pharmacies',      emoji: '💊',  color: '#5AC8FA', overpass: 'nwr["amenity"="pharmacy"]',       icon: 'M13,9H11V7H9V9H7V11H9V13H11V11H13M10,2A8,8 0 0,1 18,10A8,8 0 0,1 10,18A8,8 0 0,1 2,10A8,8 0 0,1 10,2M10,4A6,6 0 0,0 4,10A6,6 0 0,0 10,16A6,6 0 0,0 16,10A6,6 0 0,0 10,4Z' },
+  { key: 'show_atms',           label: 'ATMs',            emoji: '🏧',  color: '#FFCC00', overpass: 'nwr["amenity"="atm"]',            icon: 'M2,4V20H22V4H2M20,16H4V8H20V16M6,14H8V10H6V14M10,10H14V12H10V14H14V12H12V10H10Z' },
+  { key: 'show_restaurants',    label: 'Restaurants',     emoji: '🍴',  color: '#FF6B6B', overpass: 'nwr["amenity"="restaurant"]',     icon: 'M11,9H9V2H7V9H5V2H3V9C3,11.12 4.66,12.84 6.75,12.97V22H9.25V12.97C11.34,12.84 13,11.12 13,9V2H11V9M16,6V14H18.5V22H21V2C18.24,2 16,4.24 16,6Z' },
+  { key: 'show_supermarkets',   label: 'Supermarkets',    emoji: '🛒',  color: '#30D158', overpass: 'nwr["shop"="supermarket"]',       icon: 'M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M7,4V8H17V4H7M16,10A1,1 0 0,0 15,11A1,1 0 0,0 16,12A1,1 0 0,0 17,11A1,1 0 0,0 16,10M8,11A1,1 0 0,0 9,12A1,1 0 0,0 10,11A1,1 0 0,0 9,10A1,1 0 0,0 8,11M12,10A1,1 0 0,0 11,11A1,1 0 0,0 12,12A1,1 0 0,0 13,11A1,1 0 0,0 12,10Z' },
+  { key: 'show_schools',        label: 'Schools',         emoji: '🏫',  color: '#BF5AF2', overpass: 'nwr["amenity"="school"]',         icon: 'M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z' },
+  { key: 'show_parks',          label: 'Parks',           emoji: '🌳',  color: '#32D74B', overpass: 'nwr["leisure"="park"]',           icon: 'M11,18L13,16.84V15H11C9.9,15 9,14.1 9,13C9,11.9 9.9,11 11,11H12V10.85L12.5,9H11C8.24,9 6,11.24 6,14C6,16.76 8.24,19 11,19V18M12.5,5L11,9H13L12,13H14L15.5,9H13.5L15,5H12.5M18,12C18,14.76 15.76,17 13,17V18.91C17,18.43 20,15.07 20,11C20,6.93 17,3.57 13,3.09V5C15.76,5 18,7.24 18,10V12Z' },
 ];
 
 // ── Tile Layer URLs ────────────────────────────────────────────────
@@ -94,7 +94,6 @@ class MeerkatMapCard extends HTMLElement {
     this._poiDebounce   = null;
     this._mapInitialised = false;
     this._mapCentredOnce = false;
-    this._config        = MeerkatMapCard.getStubConfig();
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -458,21 +457,17 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    const key = `v4:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const key = `v5:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18`,
-        { headers: { 'Accept-Language': 'en', 'User-Agent': 'MeerkatMapCard/1.0' } }
-      );
+      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18`, { headers: { 'Accept-Language': 'en', 'User-Agent': 'MeerkatMapCard/1.0' } });
       const d  = await r.json();
       const a  = d.address || {};
-      // a.house_number only exists when the OSM node is tagged.
-      // Fallback: display_name often begins with the number e.g. '23, High Street, ...'
+      // Fallback: if OSM node lacks house_number tag, try display_name prefix
       let houseNum = a.house_number || '';
       if (!houseNum && d.display_name) {
-        const first = d.display_name.split(',')[0].trim();
-        if (/^\d+[A-Za-z]?$/.test(first)) houseNum = first;
+        const seg = d.display_name.split(',')[0].trim();
+        if (/^\d+[A-Za-z]?$/.test(seg)) houseNum = seg;
       }
       const streetLine = [houseNum, a.road].filter(Boolean).join(' ');
       const parts = [
@@ -751,14 +746,13 @@ class MeerkatMapCard extends HTMLElement {
 
   async _loadPOICategory(cat, s, w, n, e) {
     try {
-      const query  = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out body;`;
+      const query  = `[out:json][timeout:15];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
       const url    = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
       const resp   = await fetch(url);
-      if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
       const data   = await resp.json();
       this._renderPOILayer(cat, data.elements || []);
-    } catch (err) {
-      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, err);
+    } catch (e) {
+      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
     }
   }
 
@@ -783,9 +777,11 @@ class MeerkatMapCard extends HTMLElement {
     const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
 
     const markers = elements
-      .filter(el => el.lat != null && el.lon != null)
       .map(el => {
-        const m = L.marker([el.lat, el.lon], { icon: poiIcon });
+        const lat = el.lat ?? el.center?.lat;
+        const lon = el.lon ?? el.center?.lon;
+        if (lat == null || lon == null) return null;
+        const m = L.marker([lat, lon], { icon: poiIcon });
         m.on('click', (ev) => {
           ev.originalEvent?.stopPropagation?.();
           this._openPOIPopup(cat, el);
@@ -793,7 +789,7 @@ class MeerkatMapCard extends HTMLElement {
         return m;
       });
 
-    this._poiLayers[cat.key] = L.layerGroup(markers).addTo(this._map);
+    this._poiLayers[cat.key] = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
   }
 
   // ── POI popup ─────────────────────────────────────────────────────
