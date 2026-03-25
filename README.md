@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/jamesmcginnis/meerkat-map-card/main/assets/logo.png" alt="Meerkat Map Card" width="100" />
-
 # Meerkat Map Card
 
 **An interactive OpenStreetMap card for Home Assistant**  
@@ -60,8 +58,6 @@ Track people, explore points of interest, and open street-level imagery — all 
 2. Search for **Meerkat Map Card** and click **Download**
 3. Reload your browser
 4. Add the card to a dashboard — the visual editor will auto-detect your person entities
-
----
 
 ### Manual Installation
 
@@ -171,12 +167,8 @@ Pull requests and issues are welcome! Please open an issue first for major chang
 
 ## 📄 Licence
 
-This project is licensed under the **MIT Licence** — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT Licence** — see the [LICENSE](https://github.com/jamesmcginnis/meerkat-map-card/blob/main/LICENSE.md) file for details.
 
 ---
 
-<div align="center">
-
-Made with ❤️ for the Home Assistant community
-
-</div>
+<div align="center">Made with ❤️ for the Home Assistant community</div>
