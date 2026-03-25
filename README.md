@@ -2,6 +2,8 @@
 
 # Meerkat Map Card
 
+WORK IN PROGRESS, NOTHING WORKS YET
+
 **An interactive OpenStreetMap card for Home Assistant**  
 Track people, explore points of interest, and open street-level imagery — all from your dashboard.
 
