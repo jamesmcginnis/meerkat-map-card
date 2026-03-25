@@ -458,16 +458,16 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    const key = `v6:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const key = `v7:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
+      const r  = await fetch(`${window.location.protocol === 'https:' ? 'https:' : 'http:'}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
       const d  = await r.json();
       const a  = d.address || {};
-      let houseNum = a.house_number || '';
+      var houseNum = a.house_number || '';
       if (!houseNum && d.display_name) {
-        const seg = d.display_name.split(',')[0].trim();
-        if (/^\d+[A-Za-z]?$/.test(seg)) houseNum = seg;
+        var seg = d.display_name.split(',')[0].trim();
+        if (/^[0-9]+[A-Za-z]?$/.test(seg)) houseNum = seg;
       }
       const streetLine = [houseNum, a.road].filter(Boolean).join(' ');
       const parts = [
@@ -747,9 +747,10 @@ class MeerkatMapCard extends HTMLElement {
   async _loadPOICategory(cat, s, w, n, e) {
     try {
       const query  = `[out:json][timeout:15];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-      const url    = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+      // Match page protocol — on local http:// HA, https:// fetch is blocked as mixed content on iOS
+      const _proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const url    = `${_proto}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
       const resp   = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data   = await resp.json();
       this._renderPOILayer(cat, data.elements || []);
     } catch (e) {
@@ -779,8 +780,8 @@ class MeerkatMapCard extends HTMLElement {
 
     const markers = elements
       .map(el => {
-        const lat = el.lat ?? el.center?.lat;
-        const lon = el.lon ?? el.center?.lon;
+        const lat = el.lat != null ? el.lat : el.center ? el.center.lat : null;
+        const lon = el.lon != null ? el.lon : el.center ? el.center.lon : null;
         if (lat == null || lon == null) return null;
         const m = L.marker([lat, lon], { icon: poiIcon });
         m.on('click', (ev) => {
