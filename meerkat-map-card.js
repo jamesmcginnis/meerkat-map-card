@@ -29,18 +29,18 @@ async function _mmFetchCSS(url) {
 
 // ── POI Category Definitions ───────────────────────────────────────
 const MM_POIS = [
-  { key: 'show_shops',          label: 'Shops',           emoji: '🛍️',  color: '#FF9500', overpass: 'nwr["shop"]',                     icon: 'M19,6H17C17,3.24 14.76,1 12,1C9.24,1 7,3.24 7,6H5C3.9,6 3,6.9 3,8V20C3,21.1 3.9,22 5,22H19C20.1,22 21,21.1 21,20V8C21,6.9 20.1,6 19,6M12,3C13.66,3 15,4.34 15,6H9C9,4.34 10.34,3 12,3M19,20H5V8H19V20Z' },
-  { key: 'show_fuel',           label: 'Petrol Stations', emoji: '⛽',  color: '#FF3B30', overpass: 'nwr["amenity"="fuel"]',            icon: 'M9.5,6.5V11.5H7V4H13.5L14.5,8H18C19.1,8 20,8.9 20,10V14C20,15.1 19.1,16 18,16V20A2,2 0 0,1 16,22H6A2,2 0 0,1 4,20V6.5A2.5,2.5 0 0,1 6.5,4H9.5V6.5H7V11.5H9.5Z' },
-  { key: 'show_post_boxes',     label: 'Post Boxes',      emoji: '📮',  color: '#FF2D55', overpass: 'nwr["amenity"="post_box"]',       icon: 'M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z' },
-  { key: 'show_train_stations', label: 'Train Stations',  emoji: '🚆',  color: '#5856D6', overpass: 'nwr["railway"="station"]',        icon: 'M12,2C8,2 4,2.5 4,6V15.5C4,17.43 5.57,19 7.5,19L6,20.5V21H18V20.5L16.5,19C18.43,19 20,17.43 20,15.5V6C20,2.5 16,2 12,2M8,17A1.5,1.5 0 0,1 6.5,15.5A1.5,1.5 0 0,1 8,14A1.5,1.5 0 0,1 9.5,15.5A1.5,1.5 0 0,1 8,17M11,11H6V6H11V11M13,11V6H18V11H13M16,17A1.5,1.5 0 0,1 14.5,15.5A1.5,1.5 0 0,1 16,14A1.5,1.5 0 0,1 17.5,15.5A1.5,1.5 0 0,1 16,17Z' },
-  { key: 'show_bus_stops',      label: 'Bus Stops',       emoji: '🚌',  color: '#34C759', overpass: 'nwr["highway"="bus_stop"]',       icon: 'M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M18,11H6V6H18V11Z' },
-  { key: 'show_hospitals',      label: 'Hospitals',       emoji: '🏥',  color: '#FF3B30', overpass: 'nwr["amenity"="hospital"]',       icon: 'M18,14H14V18H10V14H6V10H10V6H14V10H18M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z' },
-  { key: 'show_pharmacies',     label: 'Pharmacies',      emoji: '💊',  color: '#5AC8FA', overpass: 'nwr["amenity"="pharmacy"]',       icon: 'M13,9H11V7H9V9H7V11H9V13H11V11H13M10,2A8,8 0 0,1 18,10A8,8 0 0,1 10,18A8,8 0 0,1 2,10A8,8 0 0,1 10,2M10,4A6,6 0 0,0 4,10A6,6 0 0,0 10,16A6,6 0 0,0 16,10A6,6 0 0,0 10,4Z' },
-  { key: 'show_atms',           label: 'ATMs',            emoji: '🏧',  color: '#FFCC00', overpass: 'nwr["amenity"="atm"]',            icon: 'M2,4V20H22V4H2M20,16H4V8H20V16M6,14H8V10H6V14M10,10H14V12H10V14H14V12H12V10H10Z' },
-  { key: 'show_restaurants',    label: 'Restaurants',     emoji: '🍴',  color: '#FF6B6B', overpass: 'nwr["amenity"="restaurant"]',     icon: 'M11,9H9V2H7V9H5V2H3V9C3,11.12 4.66,12.84 6.75,12.97V22H9.25V12.97C11.34,12.84 13,11.12 13,9V2H11V9M16,6V14H18.5V22H21V2C18.24,2 16,4.24 16,6Z' },
-  { key: 'show_supermarkets',   label: 'Supermarkets',    emoji: '🛒',  color: '#30D158', overpass: 'nwr["shop"="supermarket"]',       icon: 'M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M7,4V8H17V4H7M16,10A1,1 0 0,0 15,11A1,1 0 0,0 16,12A1,1 0 0,0 17,11A1,1 0 0,0 16,10M8,11A1,1 0 0,0 9,12A1,1 0 0,0 10,11A1,1 0 0,0 9,10A1,1 0 0,0 8,11M12,10A1,1 0 0,0 11,11A1,1 0 0,0 12,12A1,1 0 0,0 13,11A1,1 0 0,0 12,10Z' },
-  { key: 'show_schools',        label: 'Schools',         emoji: '🏫',  color: '#BF5AF2', overpass: 'nwr["amenity"="school"]',         icon: 'M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z' },
-  { key: 'show_parks',          label: 'Parks',           emoji: '🌳',  color: '#32D74B', overpass: 'nwr["leisure"="park"]',           icon: 'M11,18L13,16.84V15H11C9.9,15 9,14.1 9,13C9,11.9 9.9,11 11,11H12V10.85L12.5,9H11C8.24,9 6,11.24 6,14C6,16.76 8.24,19 11,19V18M12.5,5L11,9H13L12,13H14L15.5,9H13.5L15,5H12.5M18,12C18,14.76 15.76,17 13,17V18.91C17,18.43 20,15.07 20,11C20,6.93 17,3.57 13,3.09V5C15.76,5 18,7.24 18,10V12Z' },
+  { key: 'show_shops',          label: 'Shops',           emoji: '🛍️',  color: '#FF9500', overpass: 'node["shop"]',                     icon: 'M19,6H17C17,3.24 14.76,1 12,1C9.24,1 7,3.24 7,6H5C3.9,6 3,6.9 3,8V20C3,21.1 3.9,22 5,22H19C20.1,22 21,21.1 21,20V8C21,6.9 20.1,6 19,6M12,3C13.66,3 15,4.34 15,6H9C9,4.34 10.34,3 12,3M19,20H5V8H19V20Z' },
+  { key: 'show_fuel',           label: 'Petrol Stations', emoji: '⛽',  color: '#FF3B30', overpass: 'node["amenity"="fuel"]',            icon: 'M9.5,6.5V11.5H7V4H13.5L14.5,8H18C19.1,8 20,8.9 20,10V14C20,15.1 19.1,16 18,16V20A2,2 0 0,1 16,22H6A2,2 0 0,1 4,20V6.5A2.5,2.5 0 0,1 6.5,4H9.5V6.5H7V11.5H9.5Z' },
+  { key: 'show_post_boxes',     label: 'Post Boxes',      emoji: '📮',  color: '#FF2D55', overpass: 'node["amenity"="post_box"]',       icon: 'M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z' },
+  { key: 'show_train_stations', label: 'Train Stations',  emoji: '🚆',  color: '#5856D6', overpass: 'node["railway"="station"]',        icon: 'M12,2C8,2 4,2.5 4,6V15.5C4,17.43 5.57,19 7.5,19L6,20.5V21H18V20.5L16.5,19C18.43,19 20,17.43 20,15.5V6C20,2.5 16,2 12,2M8,17A1.5,1.5 0 0,1 6.5,15.5A1.5,1.5 0 0,1 8,14A1.5,1.5 0 0,1 9.5,15.5A1.5,1.5 0 0,1 8,17M11,11H6V6H11V11M13,11V6H18V11H13M16,17A1.5,1.5 0 0,1 14.5,15.5A1.5,1.5 0 0,1 16,14A1.5,1.5 0 0,1 17.5,15.5A1.5,1.5 0 0,1 16,17Z' },
+  { key: 'show_bus_stops',      label: 'Bus Stops',       emoji: '🚌',  color: '#34C759', overpass: 'node["highway"="bus_stop"]',       icon: 'M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M18,11H6V6H18V11Z' },
+  { key: 'show_hospitals',      label: 'Hospitals',       emoji: '🏥',  color: '#FF3B30', overpass: 'node["amenity"="hospital"]',       icon: 'M18,14H14V18H10V14H6V10H10V6H14V10H18M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z' },
+  { key: 'show_pharmacies',     label: 'Pharmacies',      emoji: '💊',  color: '#5AC8FA', overpass: 'node["amenity"="pharmacy"]',       icon: 'M13,9H11V7H9V9H7V11H9V13H11V11H13M10,2A8,8 0 0,1 18,10A8,8 0 0,1 10,18A8,8 0 0,1 2,10A8,8 0 0,1 10,2M10,4A6,6 0 0,0 4,10A6,6 0 0,0 10,16A6,6 0 0,0 16,10A6,6 0 0,0 10,4Z' },
+  { key: 'show_atms',           label: 'ATMs',            emoji: '🏧',  color: '#FFCC00', overpass: 'node["amenity"="atm"]',            icon: 'M2,4V20H22V4H2M20,16H4V8H20V16M6,14H8V10H6V14M10,10H14V12H10V14H14V12H12V10H10Z' },
+  { key: 'show_restaurants',    label: 'Restaurants',     emoji: '🍴',  color: '#FF6B6B', overpass: 'node["amenity"="restaurant"]',     icon: 'M11,9H9V2H7V9H5V2H3V9C3,11.12 4.66,12.84 6.75,12.97V22H9.25V12.97C11.34,12.84 13,11.12 13,9V2H11V9M16,6V14H18.5V22H21V2C18.24,2 16,4.24 16,6Z' },
+  { key: 'show_supermarkets',   label: 'Supermarkets',    emoji: '🛒',  color: '#30D158', overpass: 'node["shop"="supermarket"]',       icon: 'M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M7,4V8H17V4H7M16,10A1,1 0 0,0 15,11A1,1 0 0,0 16,12A1,1 0 0,0 17,11A1,1 0 0,0 16,10M8,11A1,1 0 0,0 9,12A1,1 0 0,0 10,11A1,1 0 0,0 9,10A1,1 0 0,0 8,11M12,10A1,1 0 0,0 11,11A1,1 0 0,0 12,12A1,1 0 0,0 13,11A1,1 0 0,0 12,10Z' },
+  { key: 'show_schools',        label: 'Schools',         emoji: '🏫',  color: '#BF5AF2', overpass: 'node["amenity"="school"]',         icon: 'M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z' },
+  { key: 'show_parks',          label: 'Parks',           emoji: '🌳',  color: '#32D74B', overpass: 'node["leisure"="park"]',           icon: 'M11,18L13,16.84V15H11C9.9,15 9,14.1 9,13C9,11.9 9.9,11 11,11H12V10.85L12.5,9H11C8.24,9 6,11.24 6,14C6,16.76 8.24,19 11,19V18M12.5,5L11,9H13L12,13H14L15.5,9H13.5L15,5H12.5M18,12C18,14.76 15.76,17 13,17V18.91C17,18.43 20,15.07 20,11C20,6.93 17,3.57 13,3.09V5C15.76,5 18,7.24 18,10V12Z' },
 ];
 
 // ── Tile Layer URLs ────────────────────────────────────────────────
@@ -88,14 +88,10 @@ class MeerkatMapCard extends HTMLElement {
     this._personMarker = null;
     this._poiLayers   = {};
     this._geocodeCache = {};
-    this._longPressTimer = null;
-    this._longPressFired = false;
     this._activeOverlay = null;
     this._poiDebounce   = null;
     this._mapInitialised = false;
     this._mapCentredOnce = false;
-    this._config      = MeerkatMapCard.getStubConfig();
-    this._poiFetching = {};
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -103,10 +99,10 @@ class MeerkatMapCard extends HTMLElement {
   static getStubConfig() {
     return {
       person_entity: '',
-      geocoded_entity: '',
       theme: 'dark',
       map_height: 420,
       zoom_level: 15,
+      accent_color: '#007AFF',
       show_shops:          false,
       show_fuel:           false,
       show_post_boxes:     false,
@@ -128,7 +124,6 @@ class MeerkatMapCard extends HTMLElement {
     if (this._mapInitialised) {
       this._applyTheme();
       this._updateMap();
-      this._loadAllPOIs();
     }
   }
 
@@ -144,7 +139,6 @@ class MeerkatMapCard extends HTMLElement {
   connectedCallback()    { /* map init happens in set hass */ }
   disconnectedCallback() {
     clearTimeout(this._poiDebounce);
-    clearTimeout(this._longPressTimer);
     this._closeAllOverlays();
     if (this._map) { this._map.remove(); this._map = null; this._mapInitialised = false; this._mapCentredOnce = false; }
   }
@@ -155,7 +149,7 @@ class MeerkatMapCard extends HTMLElement {
     const bg      = isDark ? 'rgba(18,18,20,0.95)' : 'rgba(250,250,252,0.97)';
     const border  = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.08)';
     const h       = parseInt(this._config.map_height) || 420;
-    const accent  = '#007AFF';
+    const accent  = this._config.accent_color || '#007AFF';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -320,7 +314,6 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
-        setTimeout(() => this._loadAllPOIs(), 600);
       });
 
     } catch (e) {
@@ -348,12 +341,13 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     this._updatePersonMarker(state, lat, lng);
+    this._loadAllPOIs();
   }
 
   // ── Person marker ─────────────────────────────────────────────────
   _updatePersonMarker(state, lat, lng) {
     const L       = window.L;
-    const accent  = '#007AFF';
+    const accent  = this._config.accent_color || '#007AFF';
     const zone    = this._getZone(state);
     const zoneColor = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : accent;
     const picUrl  = state.attributes?.entity_picture || '';
@@ -410,21 +404,8 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     // Events
-    this._personMarker.off('click').off('mousedown').off('mouseup').off('touchstart').off('touchend');
-
-    const onStart = () => {
-      this._longPressFired = false;
-      this._longPressTimer = setTimeout(() => {
-        this._longPressFired = true;
-              }, 600);
-    };
-    const onEnd = () => clearTimeout(this._longPressTimer);
-
-    this._personMarker.on('mousedown',  onStart);
-    this._personMarker.on('touchstart', onStart, { passive: true });
-    this._personMarker.on('mouseup',    onEnd);
-    this._personMarker.on('touchend',   onEnd);
-    this._personMarker.on('click',      () => { if (!this._longPressFired) this._openPersonPopup(state, lat, lng); });
+    this._personMarker.off('click');
+    this._personMarker.on('click', () => this._openPersonPopup(state, lat, lng));
   }
 
   // ── Centre on person ──────────────────────────────────────────────
@@ -458,28 +439,19 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    // Prefer HA companion geocoded sensor — has full address inc. house number
-    const geoEnt = this._config.geocoded_entity;
-    if (geoEnt && this._hass && this._hass.states[geoEnt]) {
-      const st = this._hass.states[geoEnt].state;
-      if (st && st !== 'unknown' && st !== 'unavailable') return st;
-    }
-    // Fallback: Nominatim
-    const key = `v10:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const key = `v2:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      var _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const r = await fetch(`${_p}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
-      const d = await r.json();
-      const a = d.address || {};
-      var houseNum = a.house_number || '';
-      if (!houseNum && d.display_name) {
-        var seg = d.display_name.split(',')[0].trim();
-        if (/^[0-9]+[A-Za-z]?$/.test(seg)) houseNum = seg;
-      }
-      const street = [houseNum, a.road].filter(Boolean).join(' ');
-      const parts = [street||null, a.suburb||a.quarter||a.neighbourhood||null,
-        a.town||a.city||a.village||a.county||null, a.postcode||null].filter(Boolean);
+      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, { headers: { 'Accept-Language': 'en' } });
+      const d  = await r.json();
+      const a  = d.address || {};
+      const streetLine = [a.house_number, a.road].filter(Boolean).join(' ');
+      const parts = [
+        streetLine || null,
+        a.suburb || a.quarter || a.neighbourhood || null,
+        a.town || a.city || a.village || a.county || null,
+        a.postcode || null,
+      ].filter(Boolean);
       const result = parts.join(', ') || d.display_name || 'Unknown location';
       this._geocodeCache[key] = result;
       return result;
@@ -490,7 +462,7 @@ class MeerkatMapCard extends HTMLElement {
   async _openPersonPopup(state, lat, lng) {
     this._closeAllOverlays();
     const isDark   = this._isDark();
-    const accent   = '#007AFF';
+    const accent   = this._config.accent_color || '#007AFF';
     const zone     = this._getZone(state);
     const zoneLabel = this._getZoneLabel(state);
     const zoneColor = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : accent;
@@ -589,7 +561,6 @@ class MeerkatMapCard extends HTMLElement {
   }
 
 
-
   // ── POI loading ───────────────────────────────────────────────────
   async _loadAllPOIs() {
     if (!this._mapInitialised || !this._map) return;
@@ -609,45 +580,24 @@ class MeerkatMapCard extends HTMLElement {
     }
   }
 
-  _poiCacheKey(cat, s, w, n, e) {
-    return `mmPOI:${cat.key}:${(+s).toFixed(2)},${(+w).toFixed(2)},${(+n).toFixed(2)},${(+e).toFixed(2)}`;
-  }
-
   async _loadPOICategory(cat, s, w, n, e) {
-    if (this._poiFetching[cat.key]) return;
-    // Show cached data instantly
-    const cacheKey = this._poiCacheKey(cat, s, w, n, e);
     try {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const { ts, elements } = JSON.parse(cached);
-        if (Date.now() - ts < 3600000) {
-          this._renderPOILayer(cat, elements);
-          if (Date.now() - ts < 300000) return;
-        }
-      }
-    } catch (_) {}
-    // Fetch fresh in background
-    this._poiFetching[cat.key] = true;
-    try {
-      const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-      const _p   = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const url  = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const elements = data.elements || [];
-      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
-      this._renderPOILayer(cat, elements);
+      const query  = `[out:json][timeout:15];(${cat.overpass}(${s},${w},${n},${e}););out body;`;
+      const url    = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+      const resp   = await fetch(url);
+      const data   = await resp.json();
+      this._renderPOILayer(cat, data.elements || []);
     } catch (e) {
       console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
-    } finally {
-      this._poiFetching[cat.key] = false;
     }
   }
 
   _renderPOILayer(cat, elements) {
     const L = window.L;
+    if (this._poiLayers[cat.key]) {
+      this._map.removeLayer(this._poiLayers[cat.key]);
+    }
+
     const iconHTML = `
       <div style="
         width:28px;height:28px;border-radius:8px;
@@ -663,11 +613,9 @@ class MeerkatMapCard extends HTMLElement {
     const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
 
     const markers = elements
+      .filter(el => el.lat && el.lon)
       .map(el => {
-        var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
-        var lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
-        if (lat == null || lon == null) return null;
-        const m = L.marker([lat, lon], { icon: poiIcon });
+        const m = L.marker([el.lat, el.lon], { icon: poiIcon });
         m.on('click', (ev) => {
           ev.originalEvent?.stopPropagation?.();
           this._openPOIPopup(cat, el);
@@ -675,9 +623,7 @@ class MeerkatMapCard extends HTMLElement {
         return m;
       });
 
-    const newLayer = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
-    if (this._poiLayers[cat.key]) this._map.removeLayer(this._poiLayers[cat.key]);
-    this._poiLayers[cat.key] = newLayer;
+    this._poiLayers[cat.key] = L.layerGroup(markers).addTo(this._map);
   }
 
   // ── POI popup ─────────────────────────────────────────────────────
@@ -850,13 +796,6 @@ class MeerkatMapCardEditor extends HTMLElement {
         .map(e => `<option value="${e}" ${e === cfg.person_entity ? 'selected' : ''}>${hass.states[e]?.attributes?.friendly_name||e} (${e})</option>`)
         .join('');
 
-    const geocodedOptions = '<option value="">— None —</option>' +
-      Object.keys(hass.states)
-        .filter(e => e.startsWith('sensor.') && e.includes('geocod'))
-        .sort()
-        .map(e => `<option value="${e}" ${e===cfg.geocoded_entity?'selected':''}>${hass.states[e]?.attributes?.friendly_name||e}</option>`)
-        .join('');
-
     this.shadowRoot.innerHTML = `
       <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -908,10 +847,6 @@ class MeerkatMapCardEditor extends HTMLElement {
             <div class="select-row">
               <label>Person to track</label>
               <select id="person_entity">${personOptions}</select>
-            </div>
-            <div class="select-row" style="margin-top:8px;">
-              <label style="font-size:12px;">Geocoded Location Sensor <span style="opacity:0.5;font-weight:400;">(optional — full address inc. house number)</span></label>
-              <select id="geocoded_entity">${geocodedOptions}</select>
             </div>
           </div>
         </div>
@@ -970,6 +905,17 @@ class MeerkatMapCardEditor extends HTMLElement {
         </div>
 
 
+        <!-- Accent Colour -->
+        <div>
+          <div class="section-title">Accent Colour</div>
+          <div class="card-block">
+            <div class="input-row" style="flex-direction:row;align-items:center;gap:12px;">
+              <input type="color" id="accent_color_picker" value="${cfg.accent_color || '#007AFF'}" style="width:40px;height:40px;border-radius:10px;border:none;cursor:pointer;padding:0;background:none;-webkit-appearance:none;">
+              <input type="text"  id="accent_color"        value="${cfg.accent_color || '#007AFF'}" style="flex:1;" maxlength="7" placeholder="#007AFF">
+            </div>
+          </div>
+        </div>
+
       </div>`;
 
     this._setupListeners();
@@ -979,7 +925,6 @@ class MeerkatMapCardEditor extends HTMLElement {
     const root = this.shadowRoot;
 
     root.getElementById('person_entity').onchange = e => this._updateConfig('person_entity', e.target.value);
-    if (root.getElementById('geocoded_entity')) root.getElementById('geocoded_entity').onchange = e => this._updateConfig('geocoded_entity', e.target.value);
     root.getElementById('map_height').oninput     = e => this._updateConfig('map_height', parseInt(e.target.value) || 420);
     root.getElementById('zoom_level').oninput     = e => this._updateConfig('zoom_level',  parseInt(e.target.value) || 15);
 
@@ -990,7 +935,13 @@ class MeerkatMapCardEditor extends HTMLElement {
     });
 
     // Accent colour
-    // accent_color removed
+    const picker = root.getElementById('accent_color_picker');
+    const hexIn  = root.getElementById('accent_color');
+    picker.oninput = () => { hexIn.value = picker.value; this._updateConfig('accent_color', picker.value); };
+    hexIn.oninput  = () => {
+      const v = hexIn.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) { picker.value = v; this._updateConfig('accent_color', v); }
+    };
   }
 
   _updateUI() {
@@ -998,9 +949,10 @@ class MeerkatMapCardEditor extends HTMLElement {
     const cfg  = this._config;
     const el   = id => root.getElementById(id);
     if (el('person_entity'))   el('person_entity').value   = cfg.person_entity   || '';
-    if (el('geocoded_entity')) el('geocoded_entity').value = cfg.geocoded_entity || '';
     if (el('map_height'))      el('map_height').value      = cfg.map_height      || 420;
     if (el('zoom_level'))      el('zoom_level').value      = cfg.zoom_level      || 15;
+    if (el('accent_color'))    el('accent_color').value    = cfg.accent_color    || '#007AFF';
+    if (el('accent_color_picker')) el('accent_color_picker').value = cfg.accent_color || '#007AFF';
     root.querySelectorAll('input[name="theme"]').forEach(r => r.checked = r.value === (cfg.theme || 'dark'));
     root.querySelectorAll('input[data-key]').forEach(r => r.checked = !!cfg[r.dataset.key]);
   }
@@ -1026,6 +978,6 @@ if (!window.customCards.some(c => c.type === 'meerkat-map-card')) {
     type:        'meerkat-map-card',
     name:        'Meerkat Map Card',
     preview:     false,
-    description: 'Interactive OpenStreetMap card with person tracking, POI overlays, info popups, and Mapillary street view.',
+    description: 'Interactive OpenStreetMap card with person tracking, POI overlays, and info popups.',
   });
 }
