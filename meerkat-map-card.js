@@ -94,8 +94,7 @@ class MeerkatMapCard extends HTMLElement {
     this._poiDebounce   = null;
     this._mapInitialised = false;
     this._mapCentredOnce = false;
-    // Always pre-populate so _loadAllPOIs never throws before setConfig is called
-    this._config = MeerkatMapCard.getStubConfig();
+    this._config        = MeerkatMapCard.getStubConfig();
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -332,13 +331,7 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Update map ───────────────────────────────────────────────────
   _updateMap() {
-    if (!this._mapInitialised || !this._map) return;
-
-    // POIs load regardless of whether a person entity is configured
-    this._loadAllPOIs();
-
-    // Person tracking requires hass + a configured entity
-    if (!this._hass || !this._config?.person_entity) return;
+    if (!this._mapInitialised || !this._hass || !this._config?.person_entity) return;
     const state = this._hass.states[this._config.person_entity];
     if (!state) return;
 
@@ -353,6 +346,7 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     this._updatePersonMarker(state, lat, lng);
+    this._loadAllPOIs();
   }
 
   // ── Person marker ─────────────────────────────────────────────────
@@ -464,32 +458,28 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    // v3: bump cache key whenever geocode logic changes
-    const key = `v3:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const key = `v4:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
       const r  = await fetch(
         `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18`,
-        { headers: { 'Accept-Language': 'en', 'User-Agent': 'MeerkatMapCard/1.0 (home-assistant-custom-card)' } }
+        { headers: { 'Accept-Language': 'en', 'User-Agent': 'MeerkatMapCard/1.0' } }
       );
       const d  = await r.json();
       const a  = d.address || {};
-
-      // a.house_number is present only when OSM has the building tagged.
-      // Fallback: Nominatim's display_name often starts with the house number
-      // e.g. "23, High Street, Waltham, Lincolnshire, LN8 5QT, UK"
-      let houseNum = a.house_number || null;
+      // a.house_number only exists when the OSM node is tagged.
+      // Fallback: display_name often begins with the number e.g. '23, High Street, ...'
+      let houseNum = a.house_number || '';
       if (!houseNum && d.display_name) {
         const first = d.display_name.split(',')[0].trim();
         if (/^\d+[A-Za-z]?$/.test(first)) houseNum = first;
       }
-
       const streetLine = [houseNum, a.road].filter(Boolean).join(' ');
       const parts = [
-        streetLine   || null,
-        a.suburb     || a.quarter || a.neighbourhood || null,
-        a.town       || a.city   || a.village       || a.county || null,
-        a.postcode   || null,
+        streetLine || null,
+        a.suburb || a.quarter || a.neighbourhood || null,
+        a.town || a.city || a.village || a.county || null,
+        a.postcode || null,
       ].filter(Boolean);
       const result = parts.join(', ') || d.display_name || 'Unknown location';
       this._geocodeCache[key] = result;
