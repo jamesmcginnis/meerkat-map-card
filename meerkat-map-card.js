@@ -94,6 +94,7 @@ class MeerkatMapCard extends HTMLElement {
     this._poiDebounce   = null;
     this._mapInitialised = false;
     this._mapCentredOnce = false;
+    this._config = MeerkatMapCard.getStubConfig();
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -457,10 +458,10 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    const key = `v5:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const key = `v6:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18`, { headers: { 'Accept-Language': 'en', 'User-Agent': 'MeerkatMapCard/1.0' } });
+      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
       const d  = await r.json();
       const a  = d.address || {};
       let houseNum = a.house_number || '';
@@ -729,8 +730,6 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._mapInitialised || !this._map) return;
     const bounds = this._map.getBounds();
     const s = bounds.getSouth(), w = bounds.getWest(), n = bounds.getNorth(), e = bounds.getEast();
-    const enabled = MM_POIS.filter(c => this._config[c.key]).map(c => c.key);
-    console.log('[MeerkatMap] _loadAllPOIs called. Enabled:', enabled, 'Config:', JSON.stringify(this._config));
 
     for (const cat of MM_POIS) {
       if (this._config[cat.key]) {
@@ -749,14 +748,12 @@ class MeerkatMapCard extends HTMLElement {
     try {
       const query  = `[out:json][timeout:15];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
       const url    = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-      console.log(`[MeerkatMap] Fetching POI: ${cat.key}`, url);
       const resp   = await fetch(url);
-      console.log(`[MeerkatMap] POI response: ${cat.key} status=${resp.status}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data   = await resp.json();
-      console.log(`[MeerkatMap] POI elements: ${cat.key} count=${data.elements?.length}`);
       this._renderPOILayer(cat, data.elements || []);
     } catch (e) {
-      console.error(`[MeerkatMap] POI fetch FAILED for ${cat.key}:`, e);
+      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
     }
   }
 
@@ -782,7 +779,6 @@ class MeerkatMapCard extends HTMLElement {
 
     const markers = elements
       .map(el => {
-        // nodes have lat/lon directly; ways/relations get a center object
         const lat = el.lat ?? el.center?.lat;
         const lon = el.lon ?? el.center?.lon;
         if (lat == null || lon == null) return null;
