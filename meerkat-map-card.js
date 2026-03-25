@@ -729,6 +729,8 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._mapInitialised || !this._map) return;
     const bounds = this._map.getBounds();
     const s = bounds.getSouth(), w = bounds.getWest(), n = bounds.getNorth(), e = bounds.getEast();
+    const enabled = MM_POIS.filter(c => this._config[c.key]).map(c => c.key);
+    console.log('[MeerkatMap] _loadAllPOIs called. Enabled:', enabled, 'Config:', JSON.stringify(this._config));
 
     for (const cat of MM_POIS) {
       if (this._config[cat.key]) {
@@ -747,11 +749,14 @@ class MeerkatMapCard extends HTMLElement {
     try {
       const query  = `[out:json][timeout:15];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
       const url    = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+      console.log(`[MeerkatMap] Fetching POI: ${cat.key}`, url);
       const resp   = await fetch(url);
+      console.log(`[MeerkatMap] POI response: ${cat.key} status=${resp.status}`);
       const data   = await resp.json();
+      console.log(`[MeerkatMap] POI elements: ${cat.key} count=${data.elements?.length}`);
       this._renderPOILayer(cat, data.elements || []);
     } catch (e) {
-      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
+      console.error(`[MeerkatMap] POI fetch FAILED for ${cat.key}:`, e);
     }
   }
 
