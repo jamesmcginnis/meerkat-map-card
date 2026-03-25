@@ -1,7 +1,7 @@
 /**
  * Meerkat Map Card
  * Home Assistant custom card — OpenStreetMap with person tracking,
- * POI overlays, info popups, and street-level info.
+ * * POI overlays and info popups.
  *
  * Repository: https://github.com/jamesmcginnis/meerkat-map-card
  */
@@ -320,6 +320,7 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
+        // Load POIs independently — not gated on person entity
         setTimeout(() => this._loadAllPOIs(), 600);
       });
 
@@ -348,6 +349,7 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     this._updatePersonMarker(state, lat, lng);
+    // POIs load independently via _initMap and moveend
   }
 
   // ── Person marker ─────────────────────────────────────────────────
@@ -458,29 +460,28 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    // Prefer the HA companion app geocoded sensor — it has the full address
-    // including house number, which Nominatim often lacks for residential addresses.
+    // Best source: HA companion geocoded sensor (has full address + house number)
     const geoEnt = this._config.geocoded_entity;
     if (geoEnt && this._hass && this._hass.states[geoEnt]) {
-      const state = this._hass.states[geoEnt].state;
-      if (state && state !== 'unknown' && state !== 'unavailable') return state;
+      const st = this._hass.states[geoEnt].state;
+      if (st && st !== 'unknown' && st !== 'unavailable') return st;
     }
-    // Fallback: Nominatim reverse geocode
+    // Fallback: Nominatim
     const key = `v10:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
       var _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const r  = await fetch(`${_p}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
-      const d  = await r.json();
-      const a  = d.address || {};
+      const r = await fetch(`${_p}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
+      const d = await r.json();
+      const a = d.address || {};
       var houseNum = a.house_number || '';
       if (!houseNum && d.display_name) {
         var seg = d.display_name.split(',')[0].trim();
         if (/^[0-9]+[A-Za-z]?$/.test(seg)) houseNum = seg;
       }
-      const streetLine = [houseNum, a.road].filter(Boolean).join(' ');
+      const street = [houseNum, a.road].filter(Boolean).join(' ');
       const parts = [
-        streetLine || null,
+        street || null,
         a.suburb || a.quarter || a.neighbourhood || null,
         a.town || a.city || a.village || a.county || null,
         a.postcode || null,
@@ -594,7 +595,6 @@ class MeerkatMapCard extends HTMLElement {
   }
 
 
-
   // ── POI loading ───────────────────────────────────────────────────
   async _loadAllPOIs() {
     if (!this._mapInitialised || !this._map) return;
@@ -614,17 +614,38 @@ class MeerkatMapCard extends HTMLElement {
     }
   }
 
+  _poiCacheKey(cat, s, w, n, e) {
+    return `mmPOI:${cat.key}:${(+s).toFixed(2)},${(+w).toFixed(2)},${(+n).toFixed(2)},${(+e).toFixed(2)}`;
+  }
+
   async _loadPOICategory(cat, s, w, n, e) {
     if (this._poiFetching[cat.key]) return;
+
+    // Step 1: show cached data instantly so map is never blank
+    const cacheKey = this._poiCacheKey(cat, s, w, n, e);
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const { ts, elements } = JSON.parse(cached);
+        if (Date.now() - ts < 3600000) {
+          this._renderPOILayer(cat, elements);
+          if (Date.now() - ts < 300000) return; // fresh enough, skip fetch
+        }
+      }
+    } catch (_) {}
+
+    // Step 2: fetch fresh data in background
     this._poiFetching[cat.key] = true;
     try {
-      const query  = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-      var _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const url    = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-      const resp   = await fetch(url);
+      const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
+      const _p   = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const url  = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+      const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data   = await resp.json();
-      this._renderPOILayer(cat, data.elements || []);
+      const data = await resp.json();
+      const elements = data.elements || [];
+      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
+      this._renderPOILayer(cat, elements);
     } catch (e) {
       console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
     } finally {
@@ -650,6 +671,7 @@ class MeerkatMapCard extends HTMLElement {
 
     const markers = elements
       .map(el => {
+        // nodes have lat/lon; ways/relations have a center object
         var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
         var lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
         if (lat == null || lon == null) return null;
@@ -838,9 +860,9 @@ class MeerkatMapCardEditor extends HTMLElement {
 
     const geocodedOptions = '<option value="">— None —</option>' +
       Object.keys(hass.states)
-        .filter(e => e.startsWith('sensor.') && e.endsWith('_geocoded_location'))
+        .filter(e => e.startsWith('sensor.') && e.includes('geocod'))
         .sort()
-        .map(e => `<option value="${e}" ${e === cfg.geocoded_entity ? 'selected' : ''}>${hass.states[e]?.attributes?.friendly_name||e} (${e})</option>`)
+        .map(e => `<option value="${e}" ${e===cfg.geocoded_entity?'selected':''}>${hass.states[e]?.attributes?.friendly_name||e}</option>`)
         .join('');
 
     this.shadowRoot.innerHTML = `
@@ -896,7 +918,7 @@ class MeerkatMapCardEditor extends HTMLElement {
               <select id="person_entity">${personOptions}</select>
             </div>
             <div class="select-row" style="margin-top:8px;">
-              <label>Geocoded Location Sensor <span style="opacity:0.5;font-weight:400;">(optional — shows full address including house number)</span></label>
+              <label style="font-size:12px;">Geocoded Location Sensor <span style="opacity:0.5;font-weight:400;">(optional — shows full address inc. house number)</span></label>
               <select id="geocoded_entity">${geocodedOptions}</select>
             </div>
           </div>
@@ -955,6 +977,7 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
+
       </div>`;
 
     this._setupListeners();
@@ -974,6 +997,14 @@ class MeerkatMapCardEditor extends HTMLElement {
       el.onchange = () => this._updateConfig(el.dataset.key, el.checked);
     });
 
+    // Accent colour
+    const picker = root.getElementById('accent_color_picker');
+    const hexIn  = root.getElementById('accent_color');
+    picker.oninput = () => { hexIn.value = picker.value; this._updateConfig('accent_color', picker.value); };
+    hexIn.oninput  = () => {
+      const v = hexIn.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) { picker.value = v; this._updateConfig('accent_color', v); }
+    };
   }
 
   _updateUI() {
