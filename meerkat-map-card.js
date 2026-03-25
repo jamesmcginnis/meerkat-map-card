@@ -26,7 +26,7 @@ async function _mmFetchCSS(url) {
   _mmCSSText[url] = text;
   return text;
 }
-// Inject a CSS <link> into document.head (used for non-shadow-DOM libraries)
+// Inject a CSS <link> into document.head (for non-shadow-DOM libraries)
 function _mmCSS(url) {
   if (document.querySelector(`link[href="${url}"]`)) return;
   const l = document.createElement('link');
@@ -329,11 +329,7 @@ class MeerkatMapCard extends HTMLElement {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
         // Load POIs once map is sized — independent of person tracking
-        setTimeout(() => {
-          // Second invalidateSize for iOS WebKit which may finish layout later
-          this._map.invalidateSize({ animate: false });
-          this._loadAllPOIs();
-        }, 500);
+        setTimeout(() => this._loadAllPOIs(), 500);
       });
 
     } catch (e) {
@@ -782,33 +778,68 @@ class MeerkatMapCard extends HTMLElement {
       this._map.removeLayer(this._poiLayers[cat.key]);
     }
 
-    const iconHTML = `
-      <div style="
-        width:28px;height:28px;border-radius:8px;
-        background:${cat.color};
-        display:flex;align-items:center;justify-content:center;
-        box-shadow:0 3px 8px rgba(0,0,0,0.4);
-        border:2px solid rgba(255,255,255,0.25);
-        -webkit-box-sizing:border-box;box-sizing:border-box;
-      ">
-        <svg viewBox="0 0 24 24" width="14" height="14" style="display:block;flex-shrink:0;">
-          <path d="${cat.icon}" fill="white"/>
-        </svg>
-      </div>`;
-    const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
+    // Use CircleMarker (canvas-rendered via preferCanvas:true) instead of
+    // divIcon DOM markers. DOM markers injected into a Shadow DOM are
+    // silently dropped by WKWebView on iOS — canvas rendering is not
+    // affected by Shadow DOM at all and works identically on every platform.
+    const hex   = cat.color;
+    const r     = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    const fillOpacity = 0.92;
+    const borderColor = `rgba(255,255,255,0.7)`;
 
     const markers = elements
       .map(el => {
-        var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
-        var lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
+        const lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
+        const lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
         if (lat == null || lon == null) return null;
-        const m = L.marker([lat, lon], { icon: poiIcon });
+
+        const m = L.circleMarker([lat, lon], {
+          radius:      10,
+          color:       borderColor,
+          weight:      2,
+          fillColor:   hex,
+          fillOpacity: fillOpacity,
+          opacity:     1,
+          // Emoji tooltip always visible as a permanent label
+          // We attach it as a tooltip pinned at the centre
+        });
+
+        // Permanent emoji label rendered as a Tooltip (DOM, but tiny — works fine)
+        m.bindTooltip(cat.emoji, {
+          permanent:   true,
+          direction:   'center',
+          className:   'mm-poi-emoji-tip',
+          offset:      [0, 0],
+          opacity:     1,
+        });
+
         m.on('click', (ev) => {
           ev.originalEvent?.stopPropagation?.();
           this._openPOIPopup(cat, el);
         });
         return m;
       });
+
+    // Inject tooltip CSS into shadow root once so emoji labels are sized correctly
+    if (!this.shadowRoot.getElementById('mm-poi-tip-css')) {
+      const s = document.createElement('style');
+      s.id = 'mm-poi-tip-css';
+      s.textContent = `
+        .mm-poi-emoji-tip {
+          background: transparent !important;
+          border: none !important;
+          box-shadow: none !important;
+          font-size: 11px;
+          line-height: 1;
+          padding: 0 !important;
+          margin: 0 !important;
+          pointer-events: none;
+          white-space: nowrap;
+        }
+        .mm-poi-emoji-tip::before { display: none !important; }
+      `;
+      this.shadowRoot.appendChild(s);
+    }
 
     this._poiLayers[cat.key] = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
   }
