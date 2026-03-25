@@ -87,7 +87,6 @@ class MeerkatMapCard extends HTMLElement {
     this._tileLayer   = null;
     this._personMarker = null;
     this._poiLayers   = {};
-    this._poiGen      = {};  // generation counter per category
     this._geocodeCache = {};
     this._longPressTimer = null;
     this._longPressFired = false;
@@ -96,6 +95,7 @@ class MeerkatMapCard extends HTMLElement {
     this._mapInitialised = false;
     this._mapCentredOnce = false;
     this._config = MeerkatMapCard.getStubConfig();
+    this._poiFetching = {}; // per-category in-flight guard
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -129,6 +129,7 @@ class MeerkatMapCard extends HTMLElement {
     if (this._mapInitialised) {
       this._applyTheme();
       this._updateMap();
+      this._loadAllPOIs(); // re-apply any toggled POI categories
     }
   }
 
@@ -146,7 +147,7 @@ class MeerkatMapCard extends HTMLElement {
     clearTimeout(this._poiDebounce);
     clearTimeout(this._longPressTimer);
     this._closeAllOverlays();
-    this._poiGen = {}; if (this._map) { this._map.remove(); this._map = null; this._mapInitialised = false; this._mapCentredOnce = false; }
+    if (this._map) { this._map.remove(); this._map = null; this._mapInitialised = false; this._mapCentredOnce = false; }
   }
 
   // ── Render shell ─────────────────────────────────────────────────
@@ -344,13 +345,11 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._mapCentredOnce) {
       this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
       this._mapCentredOnce = true;
+      // Load POIs once after initial centre (moveend fires too)
+      setTimeout(() => this._loadAllPOIs(), 300);
     }
 
     this._updatePersonMarker(state, lat, lng);
-    // Debounce POI loading — hass fires many times per second;
-    // without this each update launches a new batch of fetches.
-    clearTimeout(this._poiDebounce);
-    this._poiDebounce = setTimeout(() => this._loadAllPOIs(), 1200);
   }
 
   // ── Person marker ─────────────────────────────────────────────────
@@ -462,7 +461,7 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    const key = `v8:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const key = `v9:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
       const r  = await fetch(`${window.location.protocol === 'https:' ? 'https:' : 'http:'}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
@@ -749,21 +748,20 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   async _loadPOICategory(cat, s, w, n, e) {
-    // Increment generation — any in-flight fetch with a lower generation is stale
-    this._poiGen[cat.key] = (this._poiGen[cat.key] || 0) + 1;
-    const gen = this._poiGen[cat.key];
+    if (this._poiFetching[cat.key]) return; // already in flight
+    this._poiFetching[cat.key] = true;
     try {
       const query  = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-      const _proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      var _proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
       const url    = `${_proto}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
       const resp   = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data   = await resp.json();
-      // Discard if a newer fetch for this category has already started
-      if (gen !== this._poiGen[cat.key]) return;
       this._renderPOILayer(cat, data.elements || []);
     } catch (e) {
       console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
+    } finally {
+      this._poiFetching[cat.key] = false;
     }
   }
 
@@ -789,8 +787,8 @@ class MeerkatMapCard extends HTMLElement {
 
     const markers = elements
       .map(el => {
-        const lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
-        const lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
+        var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
+        var lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
         if (lat == null || lon == null) return null;
         const m = L.marker([lat, lon], { icon: poiIcon });
         m.on('click', (ev) => {
