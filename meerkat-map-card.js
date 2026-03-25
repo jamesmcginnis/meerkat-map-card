@@ -1,7 +1,7 @@
 /**
  * Meerkat Map Card
  * Home Assistant custom card — OpenStreetMap with person tracking,
- * POI overlays, info popups, and Mapillary street-view.
+ * POI overlays, info popups, and street-level info.
  *
  * Repository: https://github.com/jamesmcginnis/meerkat-map-card
  */
@@ -103,11 +103,10 @@ class MeerkatMapCard extends HTMLElement {
   static getStubConfig() {
     return {
       person_entity: '',
+      geocoded_entity: '',
       theme: 'dark',
       map_height: 420,
       zoom_level: 15,
-      accent_color: '#007AFF',
-      mapillary_token: '',
       show_shops:          false,
       show_fuel:           false,
       show_post_boxes:     false,
@@ -156,7 +155,7 @@ class MeerkatMapCard extends HTMLElement {
     const bg      = isDark ? 'rgba(18,18,20,0.95)' : 'rgba(250,250,252,0.97)';
     const border  = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.08)';
     const h       = parseInt(this._config.map_height) || 420;
-    const accent  = this._config.accent_color || '#007AFF';
+    const accent  = '#007AFF';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -321,8 +320,7 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
-        // Load POIs once map is sized — independent of person tracking
-        setTimeout(() => this._loadAllPOIs(), 500);
+        setTimeout(() => this._loadAllPOIs(), 600);
       });
 
     } catch (e) {
@@ -350,13 +348,12 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     this._updatePersonMarker(state, lat, lng);
-    // POIs are loaded independently from _initMap and moveend — not here
   }
 
   // ── Person marker ─────────────────────────────────────────────────
   _updatePersonMarker(state, lat, lng) {
     const L       = window.L;
-    const accent  = this._config.accent_color || '#007AFF';
+    const accent  = '#007AFF';
     const zone    = this._getZone(state);
     const zoneColor = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : accent;
     const picUrl  = state.attributes?.entity_picture || '';
@@ -419,8 +416,7 @@ class MeerkatMapCard extends HTMLElement {
       this._longPressFired = false;
       this._longPressTimer = setTimeout(() => {
         this._longPressFired = true;
-        this._openStreetViewPopup(lat, lng);
-      }, 600);
+              }, 600);
     };
     const onEnd = () => clearTimeout(this._longPressTimer);
 
@@ -462,10 +458,19 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Reverse geocode ───────────────────────────────────────────────
   async _reverseGeocode(lat, lng) {
-    const key = `v9:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    // Prefer the HA companion app geocoded sensor — it has the full address
+    // including house number, which Nominatim often lacks for residential addresses.
+    const geoEnt = this._config.geocoded_entity;
+    if (geoEnt && this._hass && this._hass.states[geoEnt]) {
+      const state = this._hass.states[geoEnt].state;
+      if (state && state !== 'unknown' && state !== 'unavailable') return state;
+    }
+    // Fallback: Nominatim reverse geocode
+    const key = `v10:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(`${window.location.protocol==='https:'?'https:':'http:'}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
+      var _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const r  = await fetch(`${_p}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
       const d  = await r.json();
       const a  = d.address || {};
       var houseNum = a.house_number || '';
@@ -490,7 +495,7 @@ class MeerkatMapCard extends HTMLElement {
   async _openPersonPopup(state, lat, lng) {
     this._closeAllOverlays();
     const isDark   = this._isDark();
-    const accent   = this._config.accent_color || '#007AFF';
+    const accent   = '#007AFF';
     const zone     = this._getZone(state);
     const zoneLabel = this._getZoneLabel(state);
     const zoneColor = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : accent;
@@ -571,17 +576,6 @@ class MeerkatMapCard extends HTMLElement {
     geoRow.innerHTML = `<span class="mm-info-label">Address</span><span class="mm-info-value" style="color:${subCol};font-style:italic;">Loading…</span>`;
     infoWrap.appendChild(geoRow);
 
-    // Street view hint
-    const hint = document.createElement('div');
-    hint.style.cssText = `margin-top:10px;padding:10px 14px;border-radius:12px;background:${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'};display:flex;align-items:center;gap:10px;cursor:pointer;transition:background 0.15s;`;
-    hint.innerHTML = `
-      <svg viewBox="0 0 24 24" width="20" height="20" style="flex-shrink:0;opacity:0.5;"><path d="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7-7.75 7-13C19,5.13 15.87,2 12,2z" fill="${textCol}"/></svg>
-      <div>
-        <div style="font-size:12px;font-weight:600;opacity:0.7;">Street View</div>
-        <div style="font-size:11px;opacity:0.4;margin-top:1px;">Long-press the map marker to open</div>
-      </div>`;
-    hint.addEventListener('click', () => { this._closeAllOverlays(); this._openStreetViewPopup(lat, lng); });
-    infoWrap.appendChild(hint);
 
     popup.appendChild(header);
     popup.appendChild(infoWrap);
@@ -599,135 +593,7 @@ class MeerkatMapCard extends HTMLElement {
     });
   }
 
-  // ── Street view (Mapillary) popup ─────────────────────────────────
-  async _openStreetViewPopup(lat, lng) {
-    this._closeAllOverlays();
-    const token   = this._config.mapillary_token;
-    const isDark  = this._isDark();
-    const accent  = this._config.accent_color || '#007AFF';
-    const bgBase  = isDark ? '12,12,14' : '20,20,22';
 
-    const overlay = document.createElement('div');
-    overlay.style.cssText = `position:fixed;inset:0;z-index:99999;background:rgba(${bgBase},0.97);display:flex;flex-direction:column;animation:mmFadeIn 0.2s ease;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',sans-serif;`;
-
-    const style = document.createElement('style');
-    style.textContent = MM_POPUP_KEYFRAMES;
-    overlay.appendChild(style);
-
-    // Top bar
-    const topBar = document.createElement('div');
-    topBar.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:14px 18px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.08);`;
-    topBar.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;">
-        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7-7.75 7-13C19,5.13 15.87,2 12,2z" fill="${accent}"/></svg>
-        <div>
-          <div style="font-size:14px;font-weight:700;color:#fff;">Street View</div>
-          <div style="font-size:11px;color:rgba(255,255,255,0.4);">Powered by Mapillary</div>
-        </div>
-      </div>
-      <button id="mm-sv-close" style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);font-size:16px;transition:background 0.15s;">✕</button>`;
-
-    const viewerWrap = document.createElement('div');
-    viewerWrap.id    = 'mm-mapillary-viewer';
-    viewerWrap.style.cssText = 'flex:1;position:relative;overflow:hidden;';
-
-    overlay.appendChild(topBar);
-    overlay.appendChild(viewerWrap);
-    document.body.appendChild(overlay);
-    this._activeOverlay = overlay;
-
-    topBar.querySelector('#mm-sv-close').addEventListener('click', () => this._closeAllOverlays());
-
-    if (!token) {
-      viewerWrap.innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:24px;text-align:center;">
-          <div style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;">
-            <svg viewBox="0 0 24 24" width="30" height="30"><path d="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7-7.75 7-13C19,5.13 15.87,2 12,2z" fill="${accent}"/></svg>
-          </div>
-          <div>
-            <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:8px;">Mapillary Token Required</div>
-            <div style="font-size:13px;color:rgba(255,255,255,0.45);line-height:1.55;max-width:300px;">
-              Add a free Mapillary access token in the card editor to enable street view.<br><br>
-              Get one at <span style="color:${accent};">mapillary.com/developer</span>
-            </div>
-          </div>
-        </div>`;
-      return;
-    }
-
-    // Loading state
-    viewerWrap.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:12px;"><div style="width:30px;height:30px;border-radius:50%;border:3px solid rgba(255,255,255,0.12);border-top-color:${accent};animation:mmSpin 0.8s linear infinite;"></div><div style="font-size:13px;color:rgba(255,255,255,0.4);">Finding nearby imagery…</div></div>
-      <style>@keyframes mmSpin{to{transform:rotate(360deg)}}</style>`;
-
-    try {
-      // Find nearest Mapillary image
-      const radius = 0.01; // ~1km
-      const bbox   = `${lng-radius},${lat-radius},${lng+radius},${lat+radius}`;
-      const apiUrl = `https://graph.mapillary.com/images?access_token=${token}&fields=id,thumb_2048_url,geometry,compass_angle,captured_at&bbox=${bbox}&limit=50`;
-      const resp   = await fetch(apiUrl);
-      const data   = await resp.json();
-
-      if (!data.data || data.data.length === 0) {
-        viewerWrap.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;"><div style="font-size:16px;font-weight:600;color:#fff;">No street-level imagery nearby</div><div style="font-size:13px;color:rgba(255,255,255,0.4);">Mapillary has no coverage at this location.</div></div>`;
-        return;
-      }
-
-      // Sort by distance to point
-      const sorted = data.data
-        .filter(img => img.geometry?.coordinates)
-        .map(img => {
-          const [iLng, iLat] = img.geometry.coordinates;
-          const d = Math.hypot(iLat - lat, iLng - lng);
-          return { ...img, _dist: d };
-        })
-        .sort((a, b) => a._dist - b._dist);
-
-      // Load mapillary-js viewer
-      _mmCSS('https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css');
-      await _mmScript('https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js');
-
-      viewerWrap.innerHTML = '';
-      const viewerDiv = document.createElement('div');
-      viewerDiv.id    = 'mly-viewer-inner';
-      viewerDiv.style.cssText = 'width:100%;height:100%;';
-      viewerWrap.appendChild(viewerDiv);
-
-      const { Viewer } = window.mapillary || {};
-      if (!Viewer) throw new Error('mapillary-js not available');
-
-      const viewer = new Viewer({
-        accessToken: token,
-        container:   viewerDiv,
-        imageId:     sorted[0].id,
-        component:   { cover: false },
-      });
-
-      // Navigation thumbnails
-      const thumbBar = document.createElement('div');
-      thumbBar.style.cssText = `position:absolute;bottom:0;left:0;right:0;padding:12px;display:flex;gap:8px;overflow-x:auto;background:linear-gradient(to top,rgba(0,0,0,0.7),transparent);scrollbar-width:none;`;
-      thumbBar.innerHTML = sorted.slice(0, 12).map((img, i) => `
-        <div class="mm-sv-thumb" data-id="${img.id}" style="flex-shrink:0;width:72px;height:54px;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid ${i===0 ? accent : 'transparent'};opacity:${i===0 ? 1 : 0.6};transition:all 0.2s;background:#111;">
-          <img src="${img.thumb_2048_url||''}" style="width:100%;height:100%;object-fit:cover;" loading="lazy">
-        </div>`).join('');
-
-      thumbBar.querySelectorAll('.mm-sv-thumb').forEach(el => {
-        el.addEventListener('click', () => {
-          viewer.moveTo(el.dataset.id);
-          thumbBar.querySelectorAll('.mm-sv-thumb').forEach(t => { t.style.borderColor = 'transparent'; t.style.opacity = '0.6'; });
-          el.style.borderColor = accent; el.style.opacity = '1';
-        });
-      });
-
-      viewerWrap.appendChild(thumbBar);
-      this._mapillaryViewer = viewer;
-
-    } catch (err) {
-      viewerWrap.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;padding:24px;text-align:center;">
-        <div style="font-size:16px;font-weight:600;color:#fff;">Could not load street view</div>
-        <div style="font-size:13px;color:rgba(255,255,255,0.4);">${err.message || 'An unexpected error occurred.'}</div>
-      </div>`;
-    }
-  }
 
   // ── POI loading ───────────────────────────────────────────────────
   async _loadAllPOIs() {
@@ -768,10 +634,6 @@ class MeerkatMapCard extends HTMLElement {
 
   _renderPOILayer(cat, elements) {
     const L = window.L;
-    if (this._poiLayers[cat.key]) {
-      this._map.removeLayer(this._poiLayers[cat.key]);
-    }
-
     const iconHTML = `
       <div style="
         width:28px;height:28px;border-radius:8px;
@@ -799,7 +661,9 @@ class MeerkatMapCard extends HTMLElement {
         return m;
       });
 
-    this._poiLayers[cat.key] = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
+    const newLayer = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
+    if (this._poiLayers[cat.key]) this._map.removeLayer(this._poiLayers[cat.key]);
+    this._poiLayers[cat.key] = newLayer;
   }
 
   // ── POI popup ─────────────────────────────────────────────────────
@@ -900,10 +764,6 @@ class MeerkatMapCard extends HTMLElement {
       this._activeOverlay.remove();
       this._activeOverlay = null;
     }
-    if (this._mapillaryViewer) {
-      try { this._mapillaryViewer.remove?.(); } catch {}
-      this._mapillaryViewer = null;
-    }
   }
 }
 
@@ -976,6 +836,13 @@ class MeerkatMapCardEditor extends HTMLElement {
         .map(e => `<option value="${e}" ${e === cfg.person_entity ? 'selected' : ''}>${hass.states[e]?.attributes?.friendly_name||e} (${e})</option>`)
         .join('');
 
+    const geocodedOptions = '<option value="">— None —</option>' +
+      Object.keys(hass.states)
+        .filter(e => e.startsWith('sensor.') && e.endsWith('_geocoded_location'))
+        .sort()
+        .map(e => `<option value="${e}" ${e === cfg.geocoded_entity ? 'selected' : ''}>${hass.states[e]?.attributes?.friendly_name||e} (${e})</option>`)
+        .join('');
+
     this.shadowRoot.innerHTML = `
       <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1027,6 +894,10 @@ class MeerkatMapCardEditor extends HTMLElement {
             <div class="select-row">
               <label>Person to track</label>
               <select id="person_entity">${personOptions}</select>
+            </div>
+            <div class="select-row" style="margin-top:8px;">
+              <label>Geocoded Location Sensor <span style="opacity:0.5;font-weight:400;">(optional — shows full address including house number)</span></label>
+              <select id="geocoded_entity">${geocodedOptions}</select>
             </div>
           </div>
         </div>
@@ -1084,29 +955,6 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
-        <!-- Mapillary -->
-        <div>
-          <div class="section-title">Street View (Mapillary)</div>
-          <div class="hint" style="margin-bottom:6px;">Long-press the person marker to open street view. Get a free token at mapillary.com/developer</div>
-          <div class="card-block">
-            <div class="input-row">
-              <label style="font-size:13px;font-weight:600;color:var(--primary-text-color);">Mapillary Access Token</label>
-              <input type="text" id="mapillary_token" placeholder="MLY|..." value="${cfg.mapillary_token || ''}">
-            </div>
-          </div>
-        </div>
-
-        <!-- Accent Colour -->
-        <div>
-          <div class="section-title">Accent Colour</div>
-          <div class="card-block">
-            <div class="input-row" style="flex-direction:row;align-items:center;gap:12px;">
-              <input type="color" id="accent_color_picker" value="${cfg.accent_color || '#007AFF'}" style="width:40px;height:40px;border-radius:10px;border:none;cursor:pointer;padding:0;background:none;-webkit-appearance:none;">
-              <input type="text"  id="accent_color"        value="${cfg.accent_color || '#007AFF'}" style="flex:1;" maxlength="7" placeholder="#007AFF">
-            </div>
-          </div>
-        </div>
-
       </div>`;
 
     this._setupListeners();
@@ -1116,9 +964,9 @@ class MeerkatMapCardEditor extends HTMLElement {
     const root = this.shadowRoot;
 
     root.getElementById('person_entity').onchange = e => this._updateConfig('person_entity', e.target.value);
+    if (root.getElementById('geocoded_entity')) root.getElementById('geocoded_entity').onchange = e => this._updateConfig('geocoded_entity', e.target.value);
     root.getElementById('map_height').oninput     = e => this._updateConfig('map_height', parseInt(e.target.value) || 420);
     root.getElementById('zoom_level').oninput     = e => this._updateConfig('zoom_level',  parseInt(e.target.value) || 15);
-    root.getElementById('mapillary_token').oninput = e => this._updateConfig('mapillary_token', e.target.value.trim());
 
     root.querySelectorAll('input[name="theme"]').forEach(r => r.onchange = () => this._updateConfig('theme', r.value));
 
@@ -1126,14 +974,6 @@ class MeerkatMapCardEditor extends HTMLElement {
       el.onchange = () => this._updateConfig(el.dataset.key, el.checked);
     });
 
-    // Accent colour
-    const picker = root.getElementById('accent_color_picker');
-    const hexIn  = root.getElementById('accent_color');
-    picker.oninput = () => { hexIn.value = picker.value; this._updateConfig('accent_color', picker.value); };
-    hexIn.oninput  = () => {
-      const v = hexIn.value.trim();
-      if (/^#[0-9a-fA-F]{6}$/.test(v)) { picker.value = v; this._updateConfig('accent_color', v); }
-    };
   }
 
   _updateUI() {
@@ -1141,11 +981,9 @@ class MeerkatMapCardEditor extends HTMLElement {
     const cfg  = this._config;
     const el   = id => root.getElementById(id);
     if (el('person_entity'))   el('person_entity').value   = cfg.person_entity   || '';
+    if (el('geocoded_entity')) el('geocoded_entity').value = cfg.geocoded_entity || '';
     if (el('map_height'))      el('map_height').value      = cfg.map_height      || 420;
     if (el('zoom_level'))      el('zoom_level').value      = cfg.zoom_level      || 15;
-    if (el('mapillary_token')) el('mapillary_token').value = cfg.mapillary_token || '';
-    if (el('accent_color'))    el('accent_color').value    = cfg.accent_color    || '#007AFF';
-    if (el('accent_color_picker')) el('accent_color_picker').value = cfg.accent_color || '#007AFF';
     root.querySelectorAll('input[name="theme"]').forEach(r => r.checked = r.value === (cfg.theme || 'dark'));
     root.querySelectorAll('input[data-key]').forEach(r => r.checked = !!cfg[r.dataset.key]);
   }
@@ -1171,6 +1009,6 @@ if (!window.customCards.some(c => c.type === 'meerkat-map-card')) {
     type:        'meerkat-map-card',
     name:        'Meerkat Map Card',
     preview:     false,
-    description: 'Interactive OpenStreetMap card with person tracking, POI overlays, info popups, and Mapillary street view.',
+    description: 'Interactive OpenStreetMap card with person tracking, POI overlays, and info popups.',
   });
 }
