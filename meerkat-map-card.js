@@ -26,13 +26,6 @@ async function _mmFetchCSS(url) {
   _mmCSSText[url] = text;
   return text;
 }
-// Inject a CSS <link> into document.head (for non-shadow-DOM libraries)
-function _mmCSS(url) {
-  if (document.querySelector(`link[href="${url}"]`)) return;
-  const l = document.createElement('link');
-  l.rel = 'stylesheet'; l.href = url;
-  document.head.appendChild(l);
-}
 
 // ── POI Category Definitions ───────────────────────────────────────
 const MM_POIS = [
@@ -472,7 +465,7 @@ class MeerkatMapCard extends HTMLElement {
     const key = `v9:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
+      const r  = await fetch(`${window.location.protocol==='https:'?'https:':'http:'}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
       const d  = await r.json();
       const a  = d.address || {};
       var houseNum = a.house_number || '';
@@ -760,7 +753,8 @@ class MeerkatMapCard extends HTMLElement {
     this._poiFetching[cat.key] = true;
     try {
       const query  = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-      const url    = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+      var _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const url    = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
       const resp   = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data   = await resp.json();
@@ -778,68 +772,32 @@ class MeerkatMapCard extends HTMLElement {
       this._map.removeLayer(this._poiLayers[cat.key]);
     }
 
-    // Use CircleMarker (canvas-rendered via preferCanvas:true) instead of
-    // divIcon DOM markers. DOM markers injected into a Shadow DOM are
-    // silently dropped by WKWebView on iOS — canvas rendering is not
-    // affected by Shadow DOM at all and works identically on every platform.
-    const hex   = cat.color;
-    const r     = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-    const fillOpacity = 0.92;
-    const borderColor = `rgba(255,255,255,0.7)`;
+    const iconHTML = `
+      <div style="
+        width:28px;height:28px;border-radius:8px;
+        background:${cat.color};
+        display:flex;align-items:center;justify-content:center;
+        box-shadow:0 3px 8px rgba(0,0,0,0.4);
+        border:2px solid rgba(255,255,255,0.25);
+      ">
+        <svg viewBox="0 0 24 24" width="14" height="14">
+          <path d="${cat.icon}" fill="white"/>
+        </svg>
+      </div>`;
+    const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
 
     const markers = elements
       .map(el => {
-        const lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
-        const lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
+        var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
+        var lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
         if (lat == null || lon == null) return null;
-
-        const m = L.circleMarker([lat, lon], {
-          radius:      10,
-          color:       borderColor,
-          weight:      2,
-          fillColor:   hex,
-          fillOpacity: fillOpacity,
-          opacity:     1,
-          // Emoji tooltip always visible as a permanent label
-          // We attach it as a tooltip pinned at the centre
-        });
-
-        // Permanent emoji label rendered as a Tooltip (DOM, but tiny — works fine)
-        m.bindTooltip(cat.emoji, {
-          permanent:   true,
-          direction:   'center',
-          className:   'mm-poi-emoji-tip',
-          offset:      [0, 0],
-          opacity:     1,
-        });
-
+        const m = L.marker([lat, lon], { icon: poiIcon });
         m.on('click', (ev) => {
           ev.originalEvent?.stopPropagation?.();
           this._openPOIPopup(cat, el);
         });
         return m;
       });
-
-    // Inject tooltip CSS into shadow root once so emoji labels are sized correctly
-    if (!this.shadowRoot.getElementById('mm-poi-tip-css')) {
-      const s = document.createElement('style');
-      s.id = 'mm-poi-tip-css';
-      s.textContent = `
-        .mm-poi-emoji-tip {
-          background: transparent !important;
-          border: none !important;
-          box-shadow: none !important;
-          font-size: 11px;
-          line-height: 1;
-          padding: 0 !important;
-          margin: 0 !important;
-          pointer-events: none;
-          white-space: nowrap;
-        }
-        .mm-poi-emoji-tip::before { display: none !important; }
-      `;
-      this.shadowRoot.appendChild(s);
-    }
 
     this._poiLayers[cat.key] = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
   }
@@ -920,9 +878,7 @@ class MeerkatMapCard extends HTMLElement {
     if (tags.fee)            addRow('Fee', tags.fee);
     if (tags.network)        addRow('Network', tags.network);
     if (tags.ref)            addRow('Reference', tags.ref);
-    const elLat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
-    const elLon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
-    if (elLat != null && elLon != null) addRow('Coordinates', `${parseFloat(elLat).toFixed(5)}, ${parseFloat(elLon).toFixed(5)}`);
+    addRow('Coordinates', `${parseFloat(el.lat).toFixed(5)}, ${parseFloat(el.lon).toFixed(5)}`);
 
     if (!infoWrap.children.length) {
       infoWrap.innerHTML = `<div style="font-size:13px;color:${subCol};text-align:center;padding:16px 0;">No additional information available.</div>`;
