@@ -330,7 +330,13 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Update map ───────────────────────────────────────────────────
   _updateMap() {
-    if (!this._mapInitialised || !this._hass || !this._config?.person_entity) return;
+    if (!this._mapInitialised || !this._map) return;
+
+    // POIs load regardless of whether a person entity is configured
+    this._loadAllPOIs();
+
+    // Person tracking requires hass + a configured entity
+    if (!this._hass || !this._config?.person_entity) return;
     const state = this._hass.states[this._config.person_entity];
     if (!state) return;
 
@@ -345,7 +351,6 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     this._updatePersonMarker(state, lat, lng);
-    this._loadAllPOIs();
   }
 
   // ── Person marker ─────────────────────────────────────────────────
@@ -460,7 +465,7 @@ class MeerkatMapCard extends HTMLElement {
     const key = `v2:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, { headers: { 'Accept-Language': 'en' } });
+      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18`, { headers: { 'Accept-Language': 'en' } });
       const d  = await r.json();
       const a  = d.address || {};
       const streetLine = [a.house_number, a.road].filter(Boolean).join(' ');
