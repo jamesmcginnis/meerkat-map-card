@@ -26,6 +26,13 @@ async function _mmFetchCSS(url) {
   _mmCSSText[url] = text;
   return text;
 }
+// Inject a CSS <link> into document.head (used for non-shadow-DOM libraries)
+function _mmCSS(url) {
+  if (document.querySelector(`link[href="${url}"]`)) return;
+  const l = document.createElement('link');
+  l.rel = 'stylesheet'; l.href = url;
+  document.head.appendChild(l);
+}
 
 // ── POI Category Definitions ───────────────────────────────────────
 const MM_POIS = [
@@ -322,7 +329,11 @@ class MeerkatMapCard extends HTMLElement {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
         // Load POIs once map is sized — independent of person tracking
-        setTimeout(() => this._loadAllPOIs(), 500);
+        setTimeout(() => {
+          // Second invalidateSize for iOS WebKit which may finish layout later
+          this._map.invalidateSize({ animate: false });
+          this._loadAllPOIs();
+        }, 500);
       });
 
     } catch (e) {
@@ -465,7 +476,7 @@ class MeerkatMapCard extends HTMLElement {
     const key = `v9:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     try {
-      const r  = await fetch(`${window.location.protocol==='https:'?'https:':'http:'}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
+      const r  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
       const d  = await r.json();
       const a  = d.address || {};
       var houseNum = a.house_number || '';
@@ -753,8 +764,7 @@ class MeerkatMapCard extends HTMLElement {
     this._poiFetching[cat.key] = true;
     try {
       const query  = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-      var _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const url    = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+      const url    = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
       const resp   = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data   = await resp.json();
@@ -779,8 +789,9 @@ class MeerkatMapCard extends HTMLElement {
         display:flex;align-items:center;justify-content:center;
         box-shadow:0 3px 8px rgba(0,0,0,0.4);
         border:2px solid rgba(255,255,255,0.25);
+        -webkit-box-sizing:border-box;box-sizing:border-box;
       ">
-        <svg viewBox="0 0 24 24" width="14" height="14">
+        <svg viewBox="0 0 24 24" width="14" height="14" style="display:block;flex-shrink:0;">
           <path d="${cat.icon}" fill="white"/>
         </svg>
       </div>`;
@@ -878,7 +889,9 @@ class MeerkatMapCard extends HTMLElement {
     if (tags.fee)            addRow('Fee', tags.fee);
     if (tags.network)        addRow('Network', tags.network);
     if (tags.ref)            addRow('Reference', tags.ref);
-    addRow('Coordinates', `${parseFloat(el.lat).toFixed(5)}, ${parseFloat(el.lon).toFixed(5)}`);
+    const elLat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
+    const elLon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
+    if (elLat != null && elLon != null) addRow('Coordinates', `${parseFloat(elLat).toFixed(5)}, ${parseFloat(elLon).toFixed(5)}`);
 
     if (!infoWrap.children.length) {
       infoWrap.innerHTML = `<div style="font-size:13px;color:${subCol};text-align:center;padding:16px 0;">No additional information available.</div>`;
