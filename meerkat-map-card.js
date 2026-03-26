@@ -255,10 +255,18 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Config ───────────────────────────────────────────────────────
   setConfig(config) {
+    const prev = this._config || {};
     this._config = { ...MeerkatMapCard.getStubConfig(), ...config };
     if (this._mapInitialised) {
       this._applyTheme();
       this._updateMap();
+      // Clear in-flight guard for any category that was just toggled on
+      // so the fetch fires immediately rather than being blocked
+      for (const cat of MM_POIS) {
+        if (this._config[cat.key] && !prev[cat.key]) {
+          if (this._poiFetching) this._poiFetching[cat.key] = false;
+        }
+      }
       this._loadAllPOIs();
     }
   }
@@ -821,31 +829,44 @@ class MeerkatMapCard extends HTMLElement {
       if (fallback) { this._renderPOILayer(cat, fallback); servedFromCache = true; }
     }
 
-    // Step 3: fetch fresh data
+    // Step 3: fetch fresh data using XHR — more permissive than fetch() in iOS WKWebView
     if (!this._poiFetching) this._poiFetching = {};
     this._poiFetching[cat.key] = true;
     this._poiRingStart(cat);
-    try {
-      const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-      const _p   = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const url  = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const elements = data.elements || [];
-      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
-      this._renderPOILayer(cat, elements);
-    } catch (fetchErr) {
-      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, fetchErr);
-      // Fetch failed — if we had nothing from cache, try harder to find any nearby data
-      if (!servedFromCache) {
-        const fallback = this._poiCacheFallback(cat, s, w, n, e);
-        if (fallback) this._renderPOILayer(cat, fallback);
+    const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
+    const _p   = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    const url  = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+    const xhr  = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.timeout = 30000;
+    xhr.onload = () => {
+      try {
+        if (xhr.status < 200 || xhr.status >= 300) throw new Error(`HTTP ${xhr.status}`);
+        const data = JSON.parse(xhr.responseText);
+        const elements = data.elements || [];
+        try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
+        this._renderPOILayer(cat, elements);
+      } catch (e) {
+        console.warn(`[MeerkatMapCard] POI parse error for ${cat.key}:`, e);
+        if (!servedFromCache) {
+          const fb = this._poiCacheFallback(cat, s, w, n, e);
+          if (fb) this._renderPOILayer(cat, fb);
+        }
+      } finally {
+        if (this._poiFetching) this._poiFetching[cat.key] = false;
+        this._poiRingEnd(cat);
       }
-    } finally {
+    };
+    xhr.onerror = xhr.ontimeout = () => {
+      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}`);
+      if (!servedFromCache) {
+        const fb = this._poiCacheFallback(cat, s, w, n, e);
+        if (fb) this._renderPOILayer(cat, fb);
+      }
       if (this._poiFetching) this._poiFetching[cat.key] = false;
       this._poiRingEnd(cat);
-    }
+    };
+    xhr.send();
   }
 
     _renderPOILayer(cat, elements) {
