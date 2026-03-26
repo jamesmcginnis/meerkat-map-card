@@ -1,162 +1,37 @@
 # Meerkat Map Card
 
-A custom Home Assistant Lovelace card that tracks a person entity on a live OpenStreetMap with an animated location marker, points of interest, address lookups, and distance calculations.
+Track a person entity on a live OpenStreetMap with an animated pulsing marker, points of interest, distance calculations, and full address lookup — all from a single Lovelace card.
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+## Person tracking
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=meerkat-map-card&category=plugin)
+The person marker is colour-coded by zone — green when home, orange when away. Tap it to open a popup showing:
 
------
-
-## Features
-
-- **Live person tracking** — animated pulsing marker, colour-coded by zone (green = home, orange = away)
-- **Person popup** — tap the marker to see zone, last updated, GPS accuracy, battery, speed, altitude, full address, and coordinates
-- **Points of interest** — 13 categories fetched live from OpenStreetMap via Overpass API, cached in localStorage for instant reload
-- **POI popup** — tap any POI to see name, address, distance from person, opening hours, phone, website, and more
-- **Distance measurement** — choose metric (km/m) or imperial (mi/yd) in the visual editor
-- **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
-- **Dark / Light / Auto theme**
-- **Full visual editor** — no YAML required
-- **iOS & desktop compatible** — works in the HA companion app and all desktop browsers
-
------
-
-## Installation
-
-### HACS (recommended)
-
-Click the button above, or:
-
-1. In HACS → Frontend, click the three-dot menu → **Custom repositories**
-1. Add `https://github.com/jamesmcginnis/meerkat-map-card` with category **Frontend**
-1. Install **Meerkat Map Card**
-1. Refresh your browser
-
-> **Note:** HACS requires at least one GitHub release to be published before the install button works. If you see an error, check that a release exists in the repository.
-
-### Manual
-
-1. Download `meerkat-map-card.js` from this repository
-1. Copy it to `/config/www/meerkat-map-card.js`
-1. In Home Assistant → Settings → Dashboards → Resources, add:
-- URL: `/local/meerkat-map-card.js`
-- Type: JavaScript module
-1. Refresh your browser
-
------
-
-## Configuration
-
-The card has a full visual editor — click the pencil icon after adding it to a dashboard. You can also configure it directly in YAML:
-
-```yaml
-type: custom:meerkat-map-card
-person_entity: person.sarah
-geocoded_entity: sensor.sarahs_iphone_geocoded_location
-theme: dark
-map_height: 420
-zoom_level: 15
-distance_unit: metric
-show_train_stations: true
-show_bus_stops: true
-show_hospitals: true
-show_shops: false
-show_fuel: false
-show_post_boxes: false
-show_pharmacies: false
-show_atms: false
-show_restaurants: false
-show_supermarkets: false
-show_schools: false
-show_parks: false
-show_toilets: false
-```
-
-### Options
-
-|Option               |Type  |Default |Description                                                                                                                           |
-|---------------------|------|--------|--------------------------------------------------------------------------------------------------------------------------------------|
-|`person_entity`      |string|—       |Entity ID of the person or device tracker to display                                                                                  |
-|`geocoded_entity`    |string|—       |Optional. HA companion app geocoded location sensor for full address inc. house number (e.g. `sensor.sarahs_iphone_geocoded_location`)|
-|`theme`              |string|`dark`  |Map colour scheme: `dark`, `light`, or `auto`                                                                                         |
-|`map_height`         |number|`420`   |Height of the map in pixels                                                                                                           |
-|`zoom_level`         |number|`15`    |Default zoom level (1–20)                                                                                                             |
-|`distance_unit`      |string|`metric`|Distance units in POI popups: `metric` (km/m) or `imperial` (mi/yd)                                                                   |
-|`show_train_stations`|bool  |`true`  |🚆 Train stations                                                                                                                      |
-|`show_bus_stops`     |bool  |`true`  |🚌 Bus stops                                                                                                                           |
-|`show_hospitals`     |bool  |`true`  |🏥 Hospitals                                                                                                                           |
-|`show_shops`         |bool  |`false` |🛍️ Shops                                                                                                                               |
-|`show_fuel`          |bool  |`false` |⛽ Petrol stations                                                                                                                     |
-|`show_post_boxes`    |bool  |`false` |📮 Post boxes                                                                                                                          |
-|`show_pharmacies`    |bool  |`false` |💊 Pharmacies                                                                                                                          |
-|`show_atms`          |bool  |`false` |🏧 ATMs                                                                                                                                |
-|`show_restaurants`   |bool  |`false` |🍴 Restaurants                                                                                                                         |
-|`show_supermarkets`  |bool  |`false` |🛒 Supermarkets                                                                                                                        |
-|`show_schools`       |bool  |`false` |🏫 Schools                                                                                                                             |
-|`show_parks`         |bool  |`false` |🌳 Parks                                                                                                                               |
-|`show_toilets`       |bool  |`false` |🚻 Toilets                                                                                                                             |
-
------
-
-## Person Popup
-
-Tap the person marker to see:
-
-- Zone name (Home, Away, or a custom zone label)
+- Zone name (Home, Away, or a custom zone)
 - Last updated time
-- GPS accuracy
-- Battery level
-- Speed
-- Altitude
+- GPS accuracy, battery, speed, altitude
+- Full address (including house number via the HA companion app geocoded sensor)
 - Coordinates
-- Full address (from geocoded sensor or Nominatim fallback)
 
------
+## Points of interest
 
-## Points of Interest
+53 POI categories across 7 groups, toggled individually in the visual editor. Data is fetched from OpenStreetMap via Overpass API and cached locally so the map reloads instantly on repeat visits.
 
-POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/). Results are cached in `localStorage` for 1 hour — the map loads instantly on repeat visits and continues showing the last known data even on slow connections.
+> **Note:** It is not recommended to enable too many categories at once. Each enabled category makes a separate network request and enabling several simultaneously will slow down the card, especially on mobile. A small selection of the most useful categories works best.
 
-Tapping a POI marker shows:
+**Enabled by default:** Train Stations, Bus Stops, Hospitals, Pharmacies, Supermarkets.
 
-- Name and category
-- Address (from OSM tags)
-- Opening hours
-- Phone number
-- Website (tappable link)
-- Brand / operator
-- Cuisine (restaurants)
-- Wheelchair access
-- Distance from the tracked person
+Tap any POI marker to see its name, address, opening hours, phone (tap to call), website, and distance from the tracked person.
 
------
+## Visual editor
 
-## Geocoded Location Sensor
+All settings are configurable through the built-in visual editor — no YAML required. Options include:
 
-The `geocoded_entity` option is the most reliable way to display a full address including the house number. The HA companion app (iOS and Android) creates this sensor automatically when location permissions are granted — it is the same sensor used by the built-in tile card and usually appears as `sensor.<your_name>_geocoded_location`.
+- Person entity and geocoded location sensor
+- Map height and default zoom level
+- Dark / Light / Auto theme
+- Distance units (metric or imperial)
+- 53 POI category toggles organised into 7 groups
 
-Without this option the card falls back to [Nominatim](https://nominatim.openstreetmap.org/) reverse geocoding, which may omit the house number for some residential addresses.
+## Compatibility
 
------
-
-## Privacy
-
-- Map tiles are loaded from [CARTO](https://carto.com/) (OpenStreetMap data)
-- POI data is fetched from the [Overpass API](https://overpass-api.de/) — only the visible map bounding box is sent
-- Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
-- POI results are cached in your browser’s `localStorage` only
-- No analytics, no accounts, no tracking
-
------
-
-## Requirements
-
-- Home Assistant 2023.1.0 or later
-- A `person` entity or device tracker with `latitude` and `longitude` attributes
-
------
-
-## License
-
-MIT — see <LICENSE.md>
+Works on desktop browsers and the iOS/Android Home Assistant companion app.
