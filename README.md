@@ -1,103 +1,63 @@
-<div align="center">
-
 # Meerkat Map Card
 
-WORK IN PROGRESS, NOTHING WORKS YET
+A custom Home Assistant Dashboard card that displays a live map of a tracked person with points of interest, address lookups, what3words locations, and distance calculations — built on OpenStreetMap via Leaflet.
 
-**An interactive OpenStreetMap card for Home Assistant**  
-Track people, explore points of interest, and open street-level imagery — all from your dashboard.
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 
-<br/>
+-----
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=meerkat-map-card&category=plugin)
+## Features
 
-<br/>
+- **Live person tracking** — displays the person’s current location with an animated pulsing marker, colour-coded by zone (home = green, away = orange)
+- **Tap for info** — tap the person marker to see zone, last updated time, GPS accuracy, battery, speed, altitude, address, and what3words location
+- **Full address display** — reads from the HA companion app’s geocoded location sensor (includes house number) with Nominatim as a fallback
+- **what3words** — shows the ///word.word.word location for the person and every POI, tappable to open what3words.com
+- **12 POI categories** — fetched live from OpenStreetMap via Overpass API, cached in localStorage for instant reload
+- **POI info popups** — tap any POI marker to see name, address, opening hours, phone, website, distance from person, and what3words location
+- **Distance units** — choose metric (km/m) or imperial (mi/yd) in the visual editor
+- **Dark / Light / Auto theme**
+- **Visual editor** — full GUI configuration, no YAML required
+- **Works on iPhone** — protocol-relative API calls avoid iOS mixed-content blocks; POI cache means the map works even on slow connections
 
-![Map view](https://raw.githubusercontent.com/jamesmcginnis/meerkat-map-card/main/preview1.png)
+-----
 
-<p>
-  <img src="https://raw.githubusercontent.com/jamesmcginnis/meerkat-map-card/main/preview2.png" alt="Person info popup" width="48%" />
-  &nbsp;
-  <img src="https://raw.githubusercontent.com/jamesmcginnis/meerkat-map-card/main/preview3.png" alt="POI popup" width="48%" />
-</p>
+## Installation
 
-<p>
-  <img src="https://raw.githubusercontent.com/jamesmcginnis/meerkat-map-card/main/preview4.png" alt="Street view" width="48%" />
-  &nbsp;
-  <img src="https://raw.githubusercontent.com/jamesmcginnis/meerkat-map-card/main/preview5.png" alt="Visual editor" width="48%" />
-</p>
+### HACS (recommended)
 
-</div>
+1. In HACS → Frontend, click the three-dot menu → **Custom repositories**
+1. Add `https://github.com/jamesmcginnis/meerkat-map-card` with category **Frontend**
+1. Install **Meerkat Map Card**
+1. Refresh your browser
 
----
+### Manual
 
-## ✨ Features
+1. Download `meerkat-map-card.js` from this repository
+1. Copy it to `/config/www/meerkat-map-card.js`
+1. In Home Assistant → Settings → Dashboards → Resources, add:
+- URL: `/local/meerkat-map-card.js`
+- Type: JavaScript module
 
-| Feature | Description |
-|---|---|
-| 🗺️ **OpenStreetMap** | Dark, Light, or system-auto tile themes via CartoDB |
-| 👤 **Person marker** | Entity picture in a pulsing animated circle with colour-coded zone ring |
-| 💬 **Info popup** | Tap to see zone, reverse-geocoded address, battery, GPS accuracy, speed & altitude |
-| 🌍 **Street view** | Long-press the marker to open interactive Mapillary street-level imagery |
-| 📍 **POI overlays** | 12 categories — shops, petrol stations, post boxes, transport, hospitals & more |
-| ⚙️ **Visual editor** | Auto-detects person entities; full configuration without editing YAML |
-| 🏠 **Home button** | MDI home icon returns the map view to the tracked person |
+-----
 
----
+## Configuration
 
-## 🚀 Installation
-
-### Via HACS (Recommended)
-
-1. Click the button below to open HACS and add this repository:
-
-<div align="center">
-
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=meerkat-map-card&category=plugin)
-
-</div>
-
-2. Search for **Meerkat Map Card** and click **Download**
-3. Reload your browser
-4. Add the card to a dashboard — the visual editor will auto-detect your person entities
-
-### Manual Installation
-
-1. Download [`meerkat-map-card.js`](https://github.com/jamesmcginnis/meerkat-map-card/releases/latest) from the latest release
-2. Copy it to `/config/www/meerkat-map-card.js`
-3. Go to **Settings → Dashboards → Resources** and add:
-   - **URL:** `/local/meerkat-map-card.js`
-   - **Type:** JavaScript Module
-4. Reload your browser
-
----
-
-## ⚙️ Configuration
-
-All options are available via the **visual editor** in the dashboard UI. Below is the full YAML reference:
+The card has a full visual editor — click the pencil icon after adding the card. You can also configure it directly in YAML:
 
 ```yaml
 type: custom:meerkat-map-card
-
-# Required
-person_entity: person.james
-
-# Map
-map_height: 420          # Height of the map in pixels (default: 420)
-zoom_level: 15           # Default zoom level 5–20 (default: 15)
-theme: dark              # dark | light | auto (default: dark)
-accent_color: '#007AFF'  # Hex colour for rings, buttons & highlights
-
-# Street View
-mapillary_token: 'MLY|...'  # Free token from mapillary.com/developer
-
-# Points of Interest
-show_shops: false
-show_fuel: false
-show_post_boxes: false
+person_entity: person.sarah
+geocoded_entity: sensor.sarahs_iphone_geocoded_location
+theme: dark
+map_height: 420
+zoom_level: 15
+distance_unit: metric
 show_train_stations: true
 show_bus_stops: true
 show_hospitals: true
+show_shops: false
+show_fuel: false
+show_post_boxes: false
 show_pharmacies: false
 show_atms: false
 show_restaurants: false
@@ -106,71 +66,100 @@ show_schools: false
 show_parks: false
 ```
 
----
+### Options
 
-## 🗺️ Points of Interest
+|Option               |Type  |Default |Description                                                                                                                                 |
+|---------------------|------|--------|--------------------------------------------------------------------------------------------------------------------------------------------|
+|`person_entity`      |string|—       |Entity ID of the person or device tracker to display                                                                                        |
+|`geocoded_entity`    |string|—       |HA companion app geocoded location sensor — provides the full address including house number (e.g. `sensor.sarahs_iphone_geocoded_location`)|
+|`theme`              |string|`dark`  |Map colour scheme: `dark`, `light`, or `auto`                                                                                               |
+|`map_height`         |number|`420`   |Height of the map in pixels                                                                                                                 |
+|`zoom_level`         |number|`15`    |Default zoom level (1–20)                                                                                                                   |
+|`distance_unit`      |string|`metric`|Distance in POI popups: `metric` (km / m) or `imperial` (mi / yd)                                                                           |
+|`show_train_stations`|bool  |`true`  |🚆 Train stations                                                                                                                            |
+|`show_bus_stops`     |bool  |`true`  |🚌 Bus stops                                                                                                                                 |
+|`show_hospitals`     |bool  |`true`  |🏥 Hospitals                                                                                                                                 |
+|`show_shops`         |bool  |`false` |🛍️ Shops                                                                                                                                     |
+|`show_fuel`          |bool  |`false` |⛽ Petrol stations                                                                                                                           |
+|`show_post_boxes`    |bool  |`false` |📮 Post boxes                                                                                                                                |
+|`show_pharmacies`    |bool  |`false` |💊 Pharmacies                                                                                                                                |
+|`show_atms`          |bool  |`false` |🏧 ATMs                                                                                                                                      |
+|`show_restaurants`   |bool  |`false` |🍴 Restaurants                                                                                                                               |
+|`show_supermarkets`  |bool  |`false` |🛒 Supermarkets                                                                                                                              |
+|`show_schools`       |bool  |`false` |🏫 Schools                                                                                                                                   |
+|`show_parks`         |bool  |`false` |🌳 Parks                                                                                                                                     |
 
-POI data is fetched live from [OpenStreetMap](https://www.openstreetmap.org) via the [Overpass API](https://overpass-api.de). Tapping any marker shows a popup with all available details.
+-----
 
-| Toggle | Category | Data source tag |
-|---|---|---|
-| `show_shops` | 🛍️ Shops | `shop=*` |
-| `show_fuel` | ⛽ Petrol Stations | `amenity=fuel` |
-| `show_post_boxes` | 📮 Post Boxes | `amenity=post_box` |
-| `show_train_stations` | 🚆 Train Stations | `railway=station` |
-| `show_bus_stops` | 🚌 Bus Stops | `highway=bus_stop` |
-| `show_hospitals` | 🏥 Hospitals | `amenity=hospital` |
-| `show_pharmacies` | 💊 Pharmacies | `amenity=pharmacy` |
-| `show_atms` | 🏧 ATMs | `amenity=atm` |
-| `show_restaurants` | 🍴 Restaurants | `amenity=restaurant` |
-| `show_supermarkets` | 🛒 Supermarkets | `shop=supermarket` |
-| `show_schools` | 🏫 Schools | `amenity=school` |
-| `show_parks` | 🌳 Parks | `leisure=park` |
+## Person Popup
 
----
+Tap the person marker to see:
 
-## 🌍 Street View
+- Zone (Home / Away / custom zone name)
+- Last updated time
+- GPS accuracy
+- Battery level
+- Speed
+- Altitude
+- Coordinates
+- Full address (from geocoded sensor or Nominatim)
+- what3words location (///word.word.word, tappable)
 
-Long-press the person marker on the map to open an interactive **Mapillary** street view panel. You can look around, navigate through nearby imagery using the thumbnail strip at the bottom, and close back to the map with the ✕ button.
+-----
 
-A free Mapillary access token is required. Get one at [mapillary.com/developer](https://www.mapillary.com/developer) — create an application and copy the **Client Token**.
+## Points of Interest
 
----
+POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/). Results are cached in `localStorage` for 1 hour — the map loads instantly on repeat visits and continues to show the last known POIs even if the network is slow.
 
-## 📋 Requirements
+Tapping a POI marker shows:
 
-- Home Assistant **2023.1.0** or later
-- A `person.*` entity **or** any entity with `latitude` and `longitude` attributes  
-  *(e.g. `device_tracker.*` from the Google Maps, Life360, or OwnTracks integrations)*
-- *(Optional)* Free [Mapillary access token](https://www.mapillary.com/developer) for street view
+- Name and category
+- Address (from OSM tags)
+- Opening hours
+- Phone number
+- Website (tappable)
+- Brand / operator
+- Cuisine (for restaurants)
+- Wheelchair access
+- Distance from the tracked person
+- what3words location (///word.word.word, tappable)
 
----
+-----
 
-## 🔒 Privacy
+## Geocoded Location Sensor
 
-- Map tiles are loaded from [CartoDB](https://carto.com) (OpenStreetMap data)
-- POI data is fetched from [overpass-api.de](https://overpass-api.de) — only the current map bounding box is sent
-- Reverse geocoding uses [Nominatim](https://nominatim.openstreetmap.org) (OpenStreetMap) — only GPS coordinates are sent
-- Street view imagery is from [Mapillary](https://www.mapillary.com) — your access token is stored in the card config only
-- No analytics, no tracking, no external data collection
+The `geocoded_entity` option is the most reliable way to get a full address including the house number. The HA companion app (iOS and Android) creates this sensor automatically when location permissions are granted — it typically appears as `sensor.<your_name>_geocoded_location` and is the same sensor used by the built-in tile card.
 
----
+Without this option the card falls back to Nominatim reverse geocoding, which may omit the house number for some residential addresses.
 
-## 🤝 Contributing
+-----
 
-Pull requests and issues are welcome! Please open an issue first for major changes.
+## what3words
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes: `git commit -m 'Add my feature'`
-4. Push and open a pull request
+Both the person popup and POI popups show a [what3words](https://what3words.com) address — a unique three-word combination identifying a 3 m × 3 m square anywhere on Earth. Tap the ///word.word.word link to open it in the what3words app or website.
 
----
+No API key is required.
 
-## 📄 Licence
+-----
 
-This project is licensed under the **MIT Licence** — see the [LICENSE](https://github.com/jamesmcginnis/meerkat-map-card/blob/main/LICENSE.md) file for details.
+## Privacy
 
----
+- Map tiles are loaded from [CARTO](https://carto.com/) (based on OpenStreetMap data)
+- POI data is fetched from the [Overpass API](https://overpass-api.de/) — only the visible map bounding box is sent, no personal data
+- Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
+- what3words lookups use the [what3words public API](https://developer.what3words.com/) — only coordinates are sent
+- POI results are cached in your browser’s `localStorage` only — nothing is sent to any external server beyond the API calls above
+- No analytics, no accounts, no tracking
 
-<div align="center">Made with ❤️ for the Home Assistant community</div>
+-----
+
+## Requirements
+
+- Home Assistant 2023.1.0 or later
+- A `person` entity or device tracker with `latitude` and `longitude` attributes
+
+-----
+
+## License
+
+MIT — see <LICENSE.md>
