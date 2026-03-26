@@ -379,7 +379,6 @@ class MeerkatMapCard extends HTMLElement {
           .mm-person-marker { position:relative; width:52px; height:52px; cursor:pointer; }
           .mm-person-ring {
             position:absolute; inset:-5px; border-radius:50%;
-            border: 3px solid ${zoneColor};
             box-shadow: 0 0 0 0 ${ringColor};
             animation: mmRingPulse 2.4s ease-in-out infinite;
           }
@@ -537,9 +536,6 @@ class MeerkatMapCard extends HTMLElement {
     popup.style.cssText = `background:${popupBg};backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:1px solid ${borderC};border-radius:24px 24px 20px 20px;box-shadow:0 -8px 48px rgba(0,0,0,0.5),0 0 0 0.5px ${borderC};padding:0 0 4px;width:100%;max-width:440px;max-height:82vh;overflow-y:auto;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',sans-serif;color:${textCol};`;
     popup.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
     popup.addEventListener('click', e => e.stopPropagation());
-
-    // Drag handle
-    popup.innerHTML = `<div style="display:flex;justify-content:center;padding:10px 0 4px;"><div style="width:36px;height:4px;border-radius:2px;background:${isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}"></div></div>`;
 
     // Header
     const header = document.createElement('div');
@@ -721,9 +717,6 @@ class MeerkatMapCard extends HTMLElement {
     popup.style.cssText = `background:${popupBg};backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:1px solid ${borderC};border-radius:24px 24px 20px 20px;box-shadow:0 -8px 48px rgba(0,0,0,0.5);padding:0 0 4px;width:100%;max-width:440px;max-height:75vh;overflow-y:auto;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',sans-serif;color:${textCol};`;
     popup.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
     popup.addEventListener('click', e => e.stopPropagation());
-
-    // Drag handle
-    popup.innerHTML = `<div style="display:flex;justify-content:center;padding:10px 0 4px;"><div style="width:36px;height:4px;border-radius:2px;background:${isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}"></div></div>`;
 
     // Header
     const header = document.createElement('div');
