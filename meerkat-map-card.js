@@ -28,21 +28,103 @@ async function _mmFetchCSS(url) {
 }
 
 // ── POI Category Definitions ───────────────────────────────────────
-const MM_POIS = [
-  { key: 'show_shops',          label: 'Shops',           emoji: '🛍️',  color: '#FF9500', overpass: 'nwr["shop"]',                     icon: 'M19,6H17C17,3.24 14.76,1 12,1C9.24,1 7,3.24 7,6H5C3.9,6 3,6.9 3,8V20C3,21.1 3.9,22 5,22H19C20.1,22 21,21.1 21,20V8C21,6.9 20.1,6 19,6M12,3C13.66,3 15,4.34 15,6H9C9,4.34 10.34,3 12,3M19,20H5V8H19V20Z' },
-  { key: 'show_fuel',           label: 'Petrol Stations', emoji: '⛽',  color: '#FF3B30', overpass: 'nwr["amenity"="fuel"]',            icon: 'M9.5,6.5V11.5H7V4H13.5L14.5,8H18C19.1,8 20,8.9 20,10V14C20,15.1 19.1,16 18,16V20A2,2 0 0,1 16,22H6A2,2 0 0,1 4,20V6.5A2.5,2.5 0 0,1 6.5,4H9.5V6.5H7V11.5H9.5Z' },
-  { key: 'show_post_boxes',     label: 'Post Boxes',      emoji: '📮',  color: '#FF2D55', overpass: 'nwr["amenity"="post_box"]',       icon: 'M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z' },
-  { key: 'show_train_stations', label: 'Train Stations',  emoji: '🚆',  color: '#5856D6', overpass: 'nwr["railway"="station"]',        icon: 'M12,2C8,2 4,2.5 4,6V15.5C4,17.43 5.57,19 7.5,19L6,20.5V21H18V20.5L16.5,19C18.43,19 20,17.43 20,15.5V6C20,2.5 16,2 12,2M8,17A1.5,1.5 0 0,1 6.5,15.5A1.5,1.5 0 0,1 8,14A1.5,1.5 0 0,1 9.5,15.5A1.5,1.5 0 0,1 8,17M11,11H6V6H11V11M13,11V6H18V11H13M16,17A1.5,1.5 0 0,1 14.5,15.5A1.5,1.5 0 0,1 16,14A1.5,1.5 0 0,1 17.5,15.5A1.5,1.5 0 0,1 16,17Z' },
-  { key: 'show_bus_stops',      label: 'Bus Stops',       emoji: '🚌',  color: '#34C759', overpass: 'nwr["highway"="bus_stop"]',       icon: 'M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M18,11H6V6H18V11Z' },
-  { key: 'show_hospitals',      label: 'Hospitals',       emoji: '🏥',  color: '#FF3B30', overpass: 'nwr["amenity"="hospital"]',       icon: 'M18,14H14V18H10V14H6V10H10V6H14V10H18M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z' },
-  { key: 'show_pharmacies',     label: 'Pharmacies',      emoji: '💊',  color: '#5AC8FA', overpass: 'nwr["amenity"="pharmacy"]',       icon: 'M13,9H11V7H9V9H7V11H9V13H11V11H13M10,2A8,8 0 0,1 18,10A8,8 0 0,1 10,18A8,8 0 0,1 2,10A8,8 0 0,1 10,2M10,4A6,6 0 0,0 4,10A6,6 0 0,0 10,16A6,6 0 0,0 16,10A6,6 0 0,0 10,4Z' },
-  { key: 'show_atms',           label: 'ATMs',            emoji: '🏧',  color: '#FFCC00', overpass: 'nwr["amenity"="atm"]',            icon: 'M2,4V20H22V4H2M20,16H4V8H20V16M6,14H8V10H6V14M10,10H14V12H10V14H14V12H12V10H10Z' },
-  { key: 'show_restaurants',    label: 'Restaurants',     emoji: '🍴',  color: '#FF6B6B', overpass: 'nwr["amenity"="restaurant"]',     icon: 'M11,9H9V2H7V9H5V2H3V9C3,11.12 4.66,12.84 6.75,12.97V22H9.25V12.97C11.34,12.84 13,11.12 13,9V2H11V9M16,6V14H18.5V22H21V2C18.24,2 16,4.24 16,6Z' },
-  { key: 'show_supermarkets',   label: 'Supermarkets',    emoji: '🛒',  color: '#30D158', overpass: 'nwr["shop"="supermarket"]',       icon: 'M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M7,4V8H17V4H7M16,10A1,1 0 0,0 15,11A1,1 0 0,0 16,12A1,1 0 0,0 17,11A1,1 0 0,0 16,10M8,11A1,1 0 0,0 9,12A1,1 0 0,0 10,11A1,1 0 0,0 9,10A1,1 0 0,0 8,11M12,10A1,1 0 0,0 11,11A1,1 0 0,0 12,12A1,1 0 0,0 13,11A1,1 0 0,0 12,10Z' },
-  { key: 'show_schools',        label: 'Schools',         emoji: '🏫',  color: '#BF5AF2', overpass: 'nwr["amenity"="school"]',         icon: 'M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z' },
-  { key: 'show_parks',          label: 'Parks',           emoji: '🌳',  color: '#32D74B', overpass: 'nwr["leisure"="park"]',           icon: 'M11,18L13,16.84V15H11C9.9,15 9,14.1 9,13C9,11.9 9.9,11 11,11H12V10.85L12.5,9H11C8.24,9 6,11.24 6,14C6,16.76 8.24,19 11,19V18M12.5,5L11,9H13L12,13H14L15.5,9H13.5L15,5H12.5M18,12C18,14.76 15.76,17 13,17V18.91C17,18.43 20,15.07 20,11C20,6.93 17,3.57 13,3.09V5C15.76,5 18,7.24 18,10V12Z' },
-  { key: 'show_toilets',        label: 'Toilets',         emoji: '🚻',  color: '#636366', overpass: 'nwr["amenity"="toilets"]',        icon: 'M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M10,17L5,12L6.41,10.59L10,14.17L17.59,6.58L19,8L10,17Z' },
+const MM_POI_GROUPS = [
+  {
+    label: 'Food & Drink',
+    pois: [
+      { key: 'show_restaurants',    label: 'Restaurants',       emoji: '🍴',  color: '#FF6B6B', overpass: 'nwr["amenity"="restaurant"]',      icon: 'M11,9H9V2H7V9H5V2H3V9C3,11.12 4.66,12.84 6.75,12.97V22H9.25V12.97C11.34,12.84 13,11.12 13,9V2H11V9M16,6V14H18.5V22H21V2C18.24,2 16,4.24 16,6Z' },
+      { key: 'show_cafes',          label: 'Cafés',             emoji: '☕',  color: '#A2845E', overpass: 'nwr["amenity"="cafe"]',             icon: 'M2,21H20V19H2M20,8H18V5H20M20,3H4V13A4,4 0 0,0 8,17H14A4,4 0 0,0 18,13V11H20A2,2 0 0,0 22,9V5C22,3.89 21.1,3 20,3Z' },
+      { key: 'show_pubs',           label: 'Pubs',              emoji: '🍺',  color: '#F4A828', overpass: 'nwr["amenity"="pub"]',              icon: 'M4,5H8V4A2,2 0 0,1 10,2H14A2,2 0 0,1 16,4V5H20A1,1 0 0,1 21,6V7A3,3 0 0,1 18,10V19A2,2 0 0,1 16,21H8A2,2 0 0,1 6,19V10A3,3 0 0,1 3,7V6A1,1 0 0,1 4,5Z' },
+      { key: 'show_bars',           label: 'Bars',              emoji: '🍸',  color: '#BF5AF2', overpass: 'nwr["amenity"="bar"]',              icon: 'M7,3L6,5H18L17,3H7M6.5,7L12,15V21H10V15L4.5,7H6.5M19.5,7H17.5L12,15V13L15,8.5L14,7H19.5Z' },
+      { key: 'show_fast_food',      label: 'Fast Food',         emoji: '🍔',  color: '#FF9500', overpass: 'nwr["amenity"="fast_food"]',        icon: 'M18.06,3.89C18.74,4.57 18.84,5.58 18.36,6.39L15,12H19A1,1 0 0,1 20,13L20.03,13.5A7.65,7.65 0 0,1 12.4,21H8A6,6 0 0,1 2,15V14A1,1 0 0,1 3,13H6.34C6.1,12.42 6,11.79 6,11.13C6,9.45 6.78,7.91 8.05,6.87C8.93,5.66 10.5,5 12,5C13.06,5 14.09,5.35 14.94,6C15.37,5.33 16.04,4.86 16.82,4.74C17.27,4.66 17.73,4.18 18.06,3.89Z' },
+      { key: 'show_ice_cream',      label: 'Ice Cream',         emoji: '🍦',  color: '#FF9EC0', overpass: 'nwr["amenity"="ice_cream"]',        icon: 'M12,2A5,5 0 0,1 17,7C17,8.38 16.5,9.65 15.67,10.63L12,22L8.33,10.63C7.5,9.65 7,8.38 7,7A5,5 0 0,1 12,2Z' },
+    ]
+  },
+  {
+    label: 'Shops & Services',
+    pois: [
+      { key: 'show_supermarkets',   label: 'Supermarkets',      emoji: '🛒',  color: '#30D158', overpass: 'nwr["shop"="supermarket"]',        icon: 'M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M7,4V8H17V4H7M16,10A1,1 0 0,0 15,11A1,1 0 0,0 16,12A1,1 0 0,0 17,11A1,1 0 0,0 16,10M8,11A1,1 0 0,0 9,12A1,1 0 0,0 10,11A1,1 0 0,0 9,10A1,1 0 0,0 8,11M12,10A1,1 0 0,0 11,11A1,1 0 0,0 12,12A1,1 0 0,0 13,11A1,1 0 0,0 12,10Z' },
+      { key: 'show_shops',          label: 'Shops',             emoji: '🛍️',  color: '#FF9500', overpass: 'nwr["shop"]',                      icon: 'M19,6H17C17,3.24 14.76,1 12,1C9.24,1 7,3.24 7,6H5C3.9,6 3,6.9 3,8V20C3,21.1 3.9,22 5,22H19C20.1,22 21,21.1 21,20V8C21,6.9 20.1,6 19,6M12,3C13.66,3 15,4.34 15,6H9C9,4.34 10.34,3 12,3M19,20H5V8H19V20Z' },
+      { key: 'show_bakeries',       label: 'Bakeries',          emoji: '🥖',  color: '#D4A35A', overpass: 'nwr["shop"="bakery"]',             icon: 'M18.06,3.89C18.74,4.57 18.84,5.58 18.36,6.39L15,12H19A1,1 0 0,1 20,13L20.03,13.5A7.65,7.65 0 0,1 12.4,21H8A6,6 0 0,1 2,15V14A1,1 0 0,1 3,13H6.34C6.1,12.42 6,11.79 6,11.13C6,9.45 6.78,7.91 8.05,6.87C8.93,5.66 10.5,5 12,5C13.06,5 14.09,5.35 14.94,6C15.37,5.33 16.04,4.86 16.82,4.74C17.27,4.66 17.73,4.18 18.06,3.89Z' },
+      { key: 'show_hairdressers',   label: 'Hairdressers',      emoji: '💇',  color: '#FF6EC7', overpass: 'nwr["shop"="hairdresser"]',        icon: 'M9.5,4A6.5,6.5 0 0,0 3,10.5C3,14.09 5.36,17.12 8.63,18.19L7.5,21H9.5L10.5,18.45C10.67,18.47 10.83,18.5 11,18.5C13.66,18.5 16,16.91 16,15C16,14.3 15.67,13.65 15.12,13.13C15.68,12.58 16,11.84 16,11C16,9.5 14.83,8.24 13.25,7.7C12.29,5.53 11.06,4 9.5,4M9.5,6C10.26,6 11.17,7.29 11.87,9.07C11.25,9 10.62,9 10,9H9.16C8.76,8.08 8.5,7.12 8.5,6.5C8.5,6.22 8.97,6 9.5,6M7.28,10.56C7.72,10.21 8.32,10 9,10H10C11.66,10 13,10.45 13,11C13,11.55 11.66,12 10,12H7.81C7.39,11.57 7.17,11.07 7.28,10.56M9.14,13H10C11.66,13 13,13.45 13,14C13,14.55 12.45,15 11.67,15.34C10.5,14.67 9.5,14 9.5,14L9.14,13Z' },
+      { key: 'show_post_offices',   label: 'Post Offices',      emoji: '📬',  color: '#FF6B35', overpass: 'nwr["amenity"="post_office"]',     icon: 'M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z' },
+      { key: 'show_post_boxes',     label: 'Post Boxes',        emoji: '📮',  color: '#FF2D55', overpass: 'nwr["amenity"="post_box"]',        icon: 'M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z' },
+    ]
+  },
+  {
+    label: 'Transport',
+    pois: [
+      { key: 'show_train_stations', label: 'Train Stations',    emoji: '🚆',  color: '#5856D6', overpass: 'nwr["railway"="station"]',         icon: 'M12,2C8,2 4,2.5 4,6V15.5C4,17.43 5.57,19 7.5,19L6,20.5V21H18V20.5L16.5,19C18.43,19 20,17.43 20,15.5V6C20,2.5 16,2 12,2M8,17A1.5,1.5 0 0,1 6.5,15.5A1.5,1.5 0 0,1 8,14A1.5,1.5 0 0,1 9.5,15.5A1.5,1.5 0 0,1 8,17M11,11H6V6H11V11M13,11V6H18V11H13M16,17A1.5,1.5 0 0,1 14.5,15.5A1.5,1.5 0 0,1 16,14A1.5,1.5 0 0,1 17.5,15.5A1.5,1.5 0 0,1 16,17Z' },
+      { key: 'show_bus_stops',      label: 'Bus Stops',         emoji: '🚌',  color: '#34C759', overpass: 'nwr["highway"="bus_stop"]',        icon: 'M4,16C4,16.88 4.39,17.67 5,18.22V20A1,1 0 0,0 6,21H7A1,1 0 0,0 8,20V19H16V20A1,1 0 0,0 17,21H18A1,1 0 0,0 19,20V18.22C19.61,17.67 20,16.88 20,16V6C20,2.5 16.42,2 12,2C7.58,2 4,2.5 4,6V16M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M18,11H6V6H18V11Z' },
+      { key: 'show_fuel',           label: 'Petrol Stations',   emoji: '⛽',  color: '#FF3B30', overpass: 'nwr["amenity"="fuel"]',            icon: 'M9.5,6.5V11.5H7V4H13.5L14.5,8H18C19.1,8 20,8.9 20,10V14C20,15.1 19.1,16 18,16V20A2,2 0 0,1 16,22H6A2,2 0 0,1 4,20V6.5A2.5,2.5 0 0,1 6.5,4H9.5V6.5H7V11.5H9.5Z' },
+      { key: 'show_parking',        label: 'Car Parks',         emoji: '🅿️',  color: '#0A84FF', overpass: 'nwr["amenity"="parking"]',         icon: 'M13,3A4,4 0 0,1 17,7A4,4 0 0,1 13,11H11V21H9V3M11,9H13A2,2 0 0,0 15,7A2,2 0 0,0 13,5H11V9Z' },
+      { key: 'show_ev_charging',    label: 'EV Charging',       emoji: '⚡',  color: '#30D158', overpass: 'nwr["amenity"="charging_station"]', icon: 'M12,2A7,7 0 0,1 19,9C19,11.38 17.81,13.47 16,14.74V17A1,1 0 0,1 15,18H9A1,1 0 0,1 8,17V14.74C6.19,13.47 5,11.38 5,9A7,7 0 0,1 12,2M9,21V20H15V21A1,1 0 0,1 14,22H10A1,1 0 0,1 9,21M12,4A5,5 0 0,0 7,9C7,11.05 8.23,12.81 10,13.58V16H14V13.58C15.77,12.81 17,11.05 17,9A5,5 0 0,0 12,4Z' },
+      { key: 'show_bicycle_parking',label: 'Bike Parking',      emoji: '🚲',  color: '#34C759', overpass: 'nwr["amenity"="bicycle_parking"]', icon: 'M5,20.5A3.5,3.5 0 0,1 1.5,17A3.5,3.5 0 0,1 5,13.5A3.5,3.5 0 0,1 8.5,17A3.5,3.5 0 0,1 5,20.5M5,12A5,5 0 0,0 0,17A5,5 0 0,0 5,22A5,5 0 0,0 10,17A5,5 0 0,0 5,12M14.8,10H19V8.2H15.8L13.86,4.93C13.57,4.43 13,4.1 12.4,4.1C11.93,4.1 11.5,4.29 11.2,4.6L7.5,8.29C7.19,8.6 7,9 7,9.5C7,10.13 7.33,10.66 7.85,10.97L11.2,13V18H13V11.5L10.75,10.15L13.07,7.59M19,20.5A3.5,3.5 0 0,1 15.5,17A3.5,3.5 0 0,1 19,13.5A3.5,3.5 0 0,1 22.5,17A3.5,3.5 0 0,1 19,20.5M19,12A5,5 0 0,0 14,17A5,5 0 0,0 19,22A5,5 0 0,0 24,17A5,5 0 0,0 19,12M16,4.8C17,4.8 17.8,4 17.8,3C17.8,2 17,1.2 16,1.2C15,1.2 14.2,2 14.2,3C14.2,4 15,4.8 16,4.8Z' },
+      { key: 'show_taxi',           label: 'Taxi Ranks',        emoji: '🚕',  color: '#FFCC00', overpass: 'nwr["amenity"="taxi"]',            icon: 'M18,11H6V6H18M16.5,17A1.5,1.5 0 0,1 15,15.5A1.5,1.5 0 0,1 16.5,14A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 16.5,17M7.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,14A1.5,1.5 0 0,1 9,15.5A1.5,1.5 0 0,1 7.5,17M19.88,5C19.58,4.14 18.76,3.5 17.83,3.5H16V2H8V3.5H6.17C5.24,3.5 4.42,4.14 4.12,5L2,11V21A1,1 0 0,0 3,22H4A1,1 0 0,0 5,21V20H19V21A1,1 0 0,0 20,22H21A1,1 0 0,0 22,21V11L19.88,5Z' },
+      { key: 'show_ferry',          label: 'Ferry Terminals',   emoji: '⛴️',  color: '#0A84FF', overpass: 'nwr["amenity"="ferry_terminal"]',  icon: 'M4,12H12V14H4V12M4,8H8V10H4V8M2,20L4,16H20L22,20H2M20,12H22V14H20V12M15,8H17V10H15V8M15,4H17V6H15V4M11,4H13V6H11V4Z' },
+    ]
+  },
+  {
+    label: 'Health & Emergency',
+    pois: [
+      { key: 'show_hospitals',      label: 'Hospitals',         emoji: '🏥',  color: '#FF3B30', overpass: 'nwr["amenity"="hospital"]',        icon: 'M18,14H14V18H10V14H6V10H10V6H14V10H18M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z' },
+      { key: 'show_pharmacies',     label: 'Pharmacies',        emoji: '💊',  color: '#5AC8FA', overpass: 'nwr["amenity"="pharmacy"]',        icon: 'M13,9H11V7H9V9H7V11H9V13H11V11H13M10,2A8,8 0 0,1 18,10A8,8 0 0,1 10,18A8,8 0 0,1 2,10A8,8 0 0,1 10,2M10,4A6,6 0 0,0 4,10A6,6 0 0,0 10,16A6,6 0 0,0 16,10A6,6 0 0,0 10,4Z' },
+      { key: 'show_doctors',        label: 'Doctors / GPs',     emoji: '🩺',  color: '#FF6B6B', overpass: 'nwr["amenity"="doctors"]',         icon: 'M8,3A1,1 0 0,0 7,4V9H5A2,2 0 0,0 3,11V22H21V11A2,2 0 0,0 19,9H17V4A1,1 0 0,0 16,3H8M9,5H15V9H9V5M5,11H11V13H13V11H19V20H5V11M9,14V16H7V18H9V20H11V18H13V16H11V14H9Z' },
+      { key: 'show_dentists',       label: 'Dentists',          emoji: '🦷',  color: '#5AC8FA', overpass: 'nwr["amenity"="dentist"]',         icon: 'M12,2A7,7 0 0,1 19,9C19,11.38 17.81,13.47 16,14.74V17A1,1 0 0,1 15,18H9A1,1 0 0,1 8,17V14.74C6.19,13.47 5,11.38 5,9A7,7 0 0,1 12,2M9,21V20H15V21A1,1 0 0,1 14,22H10A1,1 0 0,1 9,21Z' },
+      { key: 'show_vets',           label: 'Vets',              emoji: '🐾',  color: '#32D74B', overpass: 'nwr["amenity"="veterinary"]',      icon: 'M18.5,2C17,2 15.5,2.5 14.5,3.5L8,10L9.5,11.5L13,8H15V10L8.5,16.5C7.5,17.5 7.5,19 8.5,20C9.5,21 11,21 12,20L19,13C20.5,11.5 21,9.5 21,8C21,4.7 18.5,2 18.5,2M7,2H5C3,2 2,3 2,5V19C2,21 3,22 5,22H7C9,22 10,21 10,19V5C10,3 9,2 7,2M7,18C7.6,18 8,18.4 8,19C8,19.6 7.6,20 7,20C6.4,20 6,19.6 6,19C6,18.4 6.4,18 7,18Z' },
+      { key: 'show_police',         label: 'Police Stations',   emoji: '👮',  color: '#0A84FF', overpass: 'nwr["amenity"="police"]',          icon: 'M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,5A3,3 0 0,1 15,8A3,3 0 0,1 12,11A3,3 0 0,1 9,8A3,3 0 0,1 12,5M17.13,17C15.92,18.85 14.11,20.24 12,20.92C9.89,20.24 8.08,18.85 6.87,17C6.53,16.5 6.24,15.97 6,15.43C6,13.82 8.71,12.5 12,12.5C15.29,12.5 18,13.82 18,15.43C17.76,15.97 17.47,16.5 17.13,17Z' },
+      { key: 'show_fire_stations',  label: 'Fire Stations',     emoji: '🚒',  color: '#FF3B30', overpass: 'nwr["amenity"="fire_station"]',    icon: 'M17.66,11.2C17.43,10.9 17.15,10.64 16.89,10.38C16.22,9.78 15.46,9.35 14.82,8.72C13.33,7.26 13,4.85 13.95,3C13,3.23 12.17,3.75 11.46,4.32C8.87,6.4 7.85,10.07 9.07,13.22C9.11,13.32 9.15,13.42 9.15,13.55C9.15,13.77 9,13.97 8.8,14.05C8.57,14.15 8.33,14.09 8.14,13.93C8.08,13.88 8.04,13.83 8,13.76C6.87,12.33 6.69,10.28 7.45,8.64C5.78,10 4.87,12.3 5,14.47C5.06,14.97 5.12,15.47 5.29,15.97C5.43,16.57 5.7,17.17 6,17.7C7.08,19.43 8.95,20.67 10.96,20.92C13.1,21.19 15.39,20.8 17.03,19.32C18.86,17.66 19.5,15 18.56,12.72L18.43,12.46C18.22,12 17.66,11.2 17.66,11.2Z' },
+    ]
+  },
+  {
+    label: 'Finance',
+    pois: [
+      { key: 'show_atms',           label: 'ATMs',              emoji: '🏧',  color: '#FFCC00', overpass: 'nwr["amenity"="atm"]',             icon: 'M2,4V20H22V4H2M20,16H4V8H20V16M6,14H8V10H6V14M10,10H14V12H10V14H14V12H12V10H10Z' },
+      { key: 'show_banks',          label: 'Banks',             emoji: '🏦',  color: '#30D158', overpass: 'nwr["amenity"="bank"]',            icon: 'M2,10H10V8L12,6L14,8V10H22V12H20V20H22V22H2V20H4V12H2V10M6,12V20H11V12H6M13,12V20H18V12H13Z' },
+      { key: 'show_bureau_de_change', label: 'Currency Exchange', emoji: '💱', color: '#FFCC00', overpass: 'nwr["amenity"="bureau_de_change"]', icon: 'M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M12.5,17.75V19H11.5V17.73C10.28,17.44 9.23,16.58 9,15.42L10.47,15.19C10.67,16.02 11.4,16.5 12.5,16.5C13.58,16.5 14.5,15.84 14.5,15C14.5,14.22 13.79,13.67 12.5,13.37C10.98,13.02 9.5,12.35 9.5,11C9.5,9.87 10.44,8.96 11.5,8.62V7H12.5V8.64C13.63,8.98 14.5,9.9 14.66,11.05L13.18,11.28C13.04,10.48 12.33,10 11.5,10C10.62,10 10,10.56 10,11.25C10,12.06 10.78,12.44 12.23,12.78C14,13.18 16,13.9 16,15.5C16,16.74 14.97,17.72 12.5,17.75Z' },
+    ]
+  },
+  {
+    label: 'Education & Culture',
+    pois: [
+      { key: 'show_schools',        label: 'Schools',           emoji: '🏫',  color: '#BF5AF2', overpass: 'nwr["amenity"="school"]',          icon: 'M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z' },
+      { key: 'show_colleges',       label: 'Colleges',          emoji: '🎓',  color: '#BF5AF2', overpass: 'nwr["amenity"="college"]',         icon: 'M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z' },
+      { key: 'show_universities',   label: 'Universities',      emoji: '🎓',  color: '#5856D6', overpass: 'nwr["amenity"="university"]',      icon: 'M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z' },
+      { key: 'show_libraries',      label: 'Libraries',         emoji: '📚',  color: '#FF9500', overpass: 'nwr["amenity"="library"]',         icon: 'M12,17.5L6.5,8L9.5,3L17.5,17.5H12M12,17.5L17.5,17.5V19.5H12V17.5M5,8L2,13L5,18L8,13L5,8M19,8L16,13L19,18L22,13L19,8Z' },
+      { key: 'show_theatres',       label: 'Theatres',          emoji: '🎭',  color: '#FF6B6B', overpass: 'nwr["amenity"="theatre"]',         icon: 'M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M9,16.5V7.5L16,12L9,16.5Z' },
+      { key: 'show_cinemas',        label: 'Cinemas',           emoji: '🎬',  color: '#FF3B30', overpass: 'nwr["amenity"="cinema"]',          icon: 'M18,3V5H16V3H8V5H6V3H4V21H6V19H8V21H16V19H18V21H20V3M16,17H8V7H16V17Z' },
+      { key: 'show_museums',        label: 'Museums',           emoji: '🏛️',  color: '#A2845E', overpass: 'nwr["tourism"="museum"]',          icon: 'M22,11V13H21V20H22V22H2V20H3V13H2V11L12,2L22,11M5,13V20H9V15H11V20H13V15H15V20H19V13L12,6L5,13Z' },
+      { key: 'show_arts_centres',   label: 'Arts Centres',      emoji: '🎨',  color: '#BF5AF2', overpass: 'nwr["amenity"="arts_centre"]',     icon: 'M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M13,9.94L14.06,11L13,12.06L14.06,13L16.18,10.88L14.06,8.76L13,9.94M10.94,9.94L9.88,8.76L7.76,10.88L9.88,13L10.94,12.06L9.88,11L10.94,9.94M12,14.5C11.17,14.5 10.43,14.08 10,13.43L8.82,14.61C9.58,15.5 10.73,16 12,16C13.27,16 14.42,15.5 15.18,14.61L14,13.43C13.57,14.08 12.83,14.5 12,14.5Z' },
+      { key: 'show_worship',        label: 'Places of Worship', emoji: '⛪',  color: '#636366', overpass: 'nwr["amenity"="place_of_worship"]', icon: 'M22,9V7H20V5C20,3.89 19.1,3 18,3H4C2.89,3 2,3.89 2,5V21A1,1 0 0,0 3,22H21A1,1 0 0,0 22,21V11H24V9H22M20,21H13V17H11V21H4V5H18V21H20V9H22V21Z' },
+      { key: 'show_community',      label: 'Community Centres', emoji: '🏛️',  color: '#34C759', overpass: 'nwr["amenity"="community_centre"]', icon: 'M22,9V7H20V5C20,3.89 19.1,3 18,3H4C2.89,3 2,3.89 2,5V21A1,1 0 0,0 3,22H21A1,1 0 0,0 22,21V11H24V9H22M20,21H13V17H11V21H4V5H18V21H20V9H22V21Z' },
+    ]
+  },
+  {
+    label: 'Recreation',
+    pois: [
+      { key: 'show_parks',          label: 'Parks',             emoji: '🌳',  color: '#32D74B', overpass: 'nwr["leisure"="park"]',            icon: 'M11,18L13,16.84V15H11C9.9,15 9,14.1 9,13C9,11.9 9.9,11 11,11H12V10.85L12.5,9H11C8.24,9 6,11.24 6,14C6,16.76 8.24,19 11,19V18M12.5,5L11,9H13L12,13H14L15.5,9H13.5L15,5H12.5M18,12C18,14.76 15.76,17 13,17V18.91C17,18.43 20,15.07 20,11C20,6.93 17,3.57 13,3.09V5C15.76,5 18,7.24 18,10V12Z' },
+      { key: 'show_playgrounds',    label: 'Playgrounds',       emoji: '🛝',  color: '#FF9500', overpass: 'nwr["leisure"="playground"]',      icon: 'M5.5,5A2.5,2.5 0 0,0 3,7.5A2.5,2.5 0 0,0 5.5,10A2.5,2.5 0 0,0 8,7.5A2.5,2.5 0 0,0 5.5,5M17.5,5A2.5,2.5 0 0,0 15,7.5A2.5,2.5 0 0,0 17.5,10A2.5,2.5 0 0,0 20,7.5A2.5,2.5 0 0,0 17.5,5M7.93,11C6.36,11 5.06,12.19 5,13.76L3,22H5.25L6,18H7C7,18 6.82,17.16 6.59,16H9.41C9.18,17.16 9,18 9,18H10L10.9,13.97C10.6,13.12 10.54,12.16 10.91,11.27C10.74,11.1 10.35,11 10.07,11H7.93M17.93,11H15.93C15.65,11 15.26,11.1 15.09,11.27C15.46,12.16 15.4,13.12 15.1,13.97L16,18H17C17,18 16.82,17.16 16.59,16H19.41C19.18,17.16 19,18 19,18H21L19,13.76C18.94,12.19 17.64,11 16.07,11H17.93Z' },
+      { key: 'show_sports_centres', label: 'Sports Centres',    emoji: '🏋️',  color: '#0A84FF', overpass: 'nwr["leisure"="sports_centre"]',   icon: 'M20.57,14.86L22,13.43L20.57,12L17,15.57L8.43,7L12,3.43L10.57,2L9.14,3.43L7.71,2L5.57,4.14L4.14,2.71L2.71,4.14L4.14,5.57L2,7.71L3.43,9.14L2,10.57L3.43,12L7,8.43L15.57,17L12,20.57L13.43,22L14.86,20.57L16.29,22L18.43,19.86L19.86,21.29L21.29,19.86L19.86,18.43L22,16.29L20.57,14.86Z' },
+      { key: 'show_swimming',       label: 'Swimming Pools',    emoji: '🏊',  color: '#0A84FF', overpass: 'nwr["leisure"="swimming_pool"]',   icon: 'M2,13.5A4,4 0 0,0 6,9.5A4,4 0 0,0 10,13.5A4,4 0 0,0 14,9.5A4,4 0 0,0 18,13.5A4,4 0 0,0 22,9.5V8L20,6H18L15,9H13L10,6H8L5,9H3L2,10.5V13.5M10,18A4,4 0 0,1 6,22A4,4 0 0,1 2,18V16.5A4,4 0 0,0 6,20A4,4 0 0,0 10,16.5A4,4 0 0,0 14,20A4,4 0 0,0 18,16.5A4,4 0 0,0 22,20V18A4,4 0 0,1 18,22A4,4 0 0,1 14,18A4,4 0 0,1 10,18Z' },
+      { key: 'show_golf',           label: 'Golf Courses',      emoji: '⛳',  color: '#32D74B', overpass: 'nwr["leisure"="golf_course"]',     icon: 'M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4C14.76,4 17.23,5.16 18.95,7.05L17.06,8.94C15.84,7.72 14.04,6.96 12,6.96V4M12,19V17C14.04,17 15.84,16.24 17.06,15.02L18.95,16.91C17.23,18.8 14.76,19.96 12,19.96V19M20,12A8,8 0 0,1 12,20V18A6,6 0 0,0 18,12H20Z' },
+      { key: 'show_hotels',         label: 'Hotels',            emoji: '🏨',  color: '#FFCC00', overpass: 'nwr["tourism"="hotel"]',           icon: 'M17,11H7V5H17M17,3H7C5.89,3 5,3.89 5,5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V5C19,3.89 18.1,3 17,3Z' },
+      { key: 'show_attractions',    label: 'Attractions',       emoji: '🎡',  color: '#FF6B6B', overpass: 'nwr["tourism"="attraction"]',      icon: 'M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22C12,22 19,14.25 19,9A7,7 0 0,0 12,2Z' },
+      { key: 'show_viewpoints',     label: 'Viewpoints',        emoji: '👁️',  color: '#5856D6', overpass: 'nwr["tourism"="viewpoint"]',       icon: 'M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z' },
+      { key: 'show_campsites',      label: 'Campsites',         emoji: '⛺',  color: '#32D74B', overpass: 'nwr["tourism"="camp_site"]',       icon: 'M17,12H19L12,2L5,12H7L3,19H9.5V17H14.5V19H21L17,12Z' },
+    ]
+  },
+  {
+    label: 'Utilities & Environment',
+    pois: [
+      { key: 'show_toilets',        label: 'Toilets',           emoji: '🚻',  color: '#636366', overpass: 'nwr["amenity"="toilets"]',         icon: 'M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M10,17L5,12L6.41,10.59L10,14.17L17.59,6.58L19,8L10,17Z' },
+      { key: 'show_drinking_water', label: 'Drinking Water',    emoji: '💧',  color: '#0A84FF', overpass: 'nwr["amenity"="drinking_water"]',  icon: 'M12,2A7,7 0 0,1 19,9C19,11.38 17.81,13.47 16,14.74V17A1,1 0 0,1 15,18H9A1,1 0 0,1 8,17V14.74C6.19,13.47 5,11.38 5,9A7,7 0 0,1 12,2M9,21V20H15V21A1,1 0 0,1 14,22H10A1,1 0 0,1 9,21Z' },
+      { key: 'show_benches',        label: 'Benches',           emoji: '🪑',  color: '#A2845E', overpass: 'nwr["amenity"="bench"]',           icon: 'M2,11H4V15H10V11H14V15H20V11H22V17H20V16H14V17H10V16H4V17H2V11Z' },
+      { key: 'show_recycling',      label: 'Recycling',         emoji: '♻️',  color: '#32D74B', overpass: 'nwr["amenity"="recycling"]',       icon: 'M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M11,17H13V11H11V17M11,9H13V7H11V9Z' },
+    ]
+  },
 ];
+// Flat list for iteration (backwards compatible)
+const MM_POIS = MM_POI_GROUPS.flatMap(g => g.pois);
 
 // ── Tile Layer URLs ────────────────────────────────────────────────
 const MM_TILES = {
@@ -107,19 +189,67 @@ class MeerkatMapCard extends HTMLElement {
       map_height:          420,
       zoom_level:          15,
       distance_unit:       'metric',
+      // Food & Drink
+      show_restaurants:    false,
+      show_cafes:          false,
+      show_pubs:           false,
+      show_bars:           false,
+      show_fast_food:      false,
+      show_ice_cream:      false,
+      // Shops & Services
+      show_supermarkets:   true,
       show_shops:          false,
-      show_fuel:           false,
+      show_bakeries:       false,
+      show_hairdressers:   false,
+      show_post_offices:   false,
       show_post_boxes:     false,
+      // Transport
       show_train_stations: true,
       show_bus_stops:      true,
+      show_fuel:           false,
+      show_parking:        false,
+      show_ev_charging:    false,
+      show_bicycle_parking:false,
+      show_taxi:           false,
+      show_ferry:          false,
+      // Health & Emergency
       show_hospitals:      true,
-      show_pharmacies:     false,
+      show_pharmacies:     true,
+      show_doctors:        false,
+      show_dentists:       false,
+      show_vets:           false,
+      show_police:         false,
+      show_fire_stations:  false,
+      // Finance
       show_atms:           false,
-      show_restaurants:    false,
-      show_supermarkets:   false,
+      show_banks:          false,
+      show_bureau_de_change: false,
+      // Education & Culture
       show_schools:        false,
+      show_colleges:       false,
+      show_universities:   false,
+      show_libraries:      false,
+      show_theatres:       false,
+      show_cinemas:        false,
+      show_museums:        false,
+      show_arts_centres:   false,
+      show_worship:        false,
+      show_community:      false,
+      // Recreation
       show_parks:          false,
+      show_playgrounds:    false,
+      show_sports_centres: false,
+      show_swimming:       false,
+      show_golf:           false,
+      show_hotels:         false,
+      show_attractions:    false,
+      show_viewpoints:     false,
+      show_campsites:      false,
+      // Utilities & Environment
       show_toilets:        false,
+      show_drinking_water: false,
+      show_benches:        false,
+      show_recycling:      false,
     };
   }
 
@@ -1121,23 +1251,25 @@ class MeerkatMapCardEditor extends HTMLElement {
         <!-- Points of Interest -->
         <div>
           <div class="section-title">Points of Interest</div>
-          <div class="hint" style="margin-bottom:6px;">Toggle which categories appear on the map. Data from OpenStreetMap via Overpass API.</div>
-          <div class="card-block">
-            <div class="toggle-list">
-              ${MM_POIS.map(cat => `
-                <div class="toggle-item">
-                  <div class="toggle-left">
-                    <span class="toggle-icon">${cat.emoji}</span>
-                    <div>
+          <div class="hint" style="margin-bottom:6px;">Toggle categories. Data from OpenStreetMap via Overpass API.</div>
+          ${MM_POI_GROUPS.map(group => `
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--secondary-text-color);padding:6px 0 2px;">${group.label}</div>
+            <div class="card-block">
+              <div class="toggle-list">
+                ${group.pois.map(cat => `
+                  <div class="toggle-item">
+                    <div class="toggle-left">
+                      <span class="toggle-icon">${cat.emoji}</span>
                       <div class="toggle-label">${cat.label}</div>
                     </div>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" data-key="${cat.key}" ${cfg[cat.key] ? 'checked' : ''}><span class="toggle-track"></span>
-                  </label>
-                </div>`).join('')}
+                    <label class="toggle-switch">
+                      <input type="checkbox" data-key="${cat.key}" ${cfg[cat.key] ? 'checked' : ''}><span class="toggle-track"></span>
+                    </label>
+                  </div>`).join('')}
+              </div>
             </div>
-          </div>
+          </div>`).join('')}
         </div>
 
 
