@@ -829,36 +829,24 @@ class MeerkatMapCard extends HTMLElement {
       if (fallback) { this._renderPOILayer(cat, fallback); servedFromCache = true; }
     }
 
-    // Step 3: fetch fresh data using XHR — more permissive than fetch() in iOS WKWebView
+    // Step 3: fetch Overpass data
+    // On iOS WKWebView, direct requests to overpass-api.de are blocked by CSP.
+    // We route via HA using a rest_command (see README for setup instructions).
     if (!this._poiFetching) this._poiFetching = {};
     this._poiFetching[cat.key] = true;
     this._poiRingStart(cat);
-    const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-    const _p   = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const url  = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-    const xhr  = new XMLHttpRequest();
-    xhr.open('GET', url, true);
-    xhr.timeout = 30000;
-    xhr.onload = () => {
-      try {
-        if (xhr.status < 200 || xhr.status >= 300) throw new Error(`HTTP ${xhr.status}`);
-        const data = JSON.parse(xhr.responseText);
-        const elements = data.elements || [];
-        try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
-        this._renderPOILayer(cat, elements);
-      } catch (e) {
-        console.warn(`[MeerkatMapCard] POI parse error for ${cat.key}:`, e);
-        if (!servedFromCache) {
-          const fb = this._poiCacheFallback(cat, s, w, n, e);
-          if (fb) this._renderPOILayer(cat, fb);
-        }
-      } finally {
-        if (this._poiFetching) this._poiFetching[cat.key] = false;
-        this._poiRingEnd(cat);
-      }
+
+    const query      = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
+    const encodedQ   = encodeURIComponent(query);
+    const directUrl  = `https://overpass-api.de/api/interpreter?data=${encodedQ}`;
+
+    const onSuccess = (elements) => {
+      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
+      this._renderPOILayer(cat, elements);
+      if (this._poiFetching) this._poiFetching[cat.key] = false;
+      this._poiRingEnd(cat);
     };
-    xhr.onerror = xhr.ontimeout = () => {
-      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}`);
+    const onFail = () => {
       if (!servedFromCache) {
         const fb = this._poiCacheFallback(cat, s, w, n, e);
         if (fb) this._renderPOILayer(cat, fb);
@@ -866,7 +854,41 @@ class MeerkatMapCard extends HTMLElement {
       if (this._poiFetching) this._poiFetching[cat.key] = false;
       this._poiRingEnd(cat);
     };
-    xhr.send();
+
+    // Try via HA proxy first (works on iOS); fall back to direct fetch (works on desktop)
+    this._overpassViaHA(directUrl)
+      .then(onSuccess)
+      .catch(() => {
+        // HA proxy not configured or failed — try direct
+        fetch(directUrl)
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(d => onSuccess(d.elements || []))
+          .catch(onFail);
+      });
+  }
+
+  // ── HA-proxied Overpass fetch (bypasses iOS CSP) ───────────────────
+  // Requires this in configuration.yaml:
+  //   rest_command:
+  //     overpass_query:
+  //       url: "{{ url }}"
+  //       method: GET
+  //
+  // Returns a promise resolving to elements[], or rejects if unavailable.
+  async _overpassViaHA(url) {
+    if (!this._hass) throw new Error('no hass');
+    // Use hass.callApi to POST to /api/services/rest_command/overpass_query
+    // This runs server-side, bypassing the browser CSP entirely.
+    const resp = await this._hass.callApi(
+      'POST',
+      'services/rest_command/overpass_query',
+      { url }
+    );
+    // rest_command returns the response body as a string in resp[0].attributes.response
+    const body = resp && resp[0] && resp[0].attributes && resp[0].attributes.response;
+    if (!body) throw new Error('no response');
+    const data = JSON.parse(body);
+    return data.elements || [];
   }
 
     _renderPOILayer(cat, elements) {
