@@ -628,25 +628,60 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   _poiCacheKey(cat, s, w, n, e) {
-    return `mmPOI:${cat.key}:${(+s).toFixed(2)},${(+w).toFixed(2)},${(+n).toFixed(2)},${(+e).toFixed(2)}`;
+    // toFixed(3) ≈ 110m grid — fine enough to reuse when zoomed into a street
+    return `mmPOI:${cat.key}:${(+s).toFixed(3)},${(+w).toFixed(3)},${(+n).toFixed(3)},${(+e).toFixed(3)}`;
+  }
+
+  // Find the best overlapping cache entry for this category ─────────
+  _poiCacheFallback(cat, s, w, n, e) {
+    try {
+      const prefix = `mmPOI:${cat.key}:`;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith(prefix)) continue;
+        const parts = k.slice(prefix.length).split(',');
+        if (parts.length !== 4) continue;
+        const [cs, cw, cn, ce] = parts.map(Number);
+        // Use this cache entry if it covers the current view centre
+        const midLat = (s + n) / 2, midLng = (w + e) / 2;
+        if (midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const { ts, elements } = JSON.parse(raw);
+            if (Date.now() - ts < 3600000) return elements;
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   async _loadPOICategory(cat, s, w, n, e) {
     if (this._poiFetching && this._poiFetching[cat.key]) return;
 
-    // Serve cached data instantly so map is never blank on reload
+    // Step 1: exact cache hit → render immediately
     const cacheKey = this._poiCacheKey(cat, s, w, n, e);
+    let servedFromCache = false;
     try {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         const { ts, elements } = JSON.parse(cached);
         if (Date.now() - ts < 3600000) {
           this._renderPOILayer(cat, elements);
-          if (Date.now() - ts < 300000) return; // <5 min old, skip fetch
+          servedFromCache = true;
+          // Still refresh in background if >5 min old
+          if (Date.now() - ts < 300000) return;
         }
       }
     } catch (_) {}
 
+    // Step 2: no exact hit — try nearby cache to show something while fetching
+    if (!servedFromCache) {
+      const fallback = this._poiCacheFallback(cat, s, w, n, e);
+      if (fallback) { this._renderPOILayer(cat, fallback); servedFromCache = true; }
+    }
+
+    // Step 3: fetch fresh data
     if (!this._poiFetching) this._poiFetching = {};
     this._poiFetching[cat.key] = true;
     this._poiRingStart(cat);
@@ -660,8 +695,13 @@ class MeerkatMapCard extends HTMLElement {
       const elements = data.elements || [];
       try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
       this._renderPOILayer(cat, elements);
-    } catch (e) {
-      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
+    } catch (fetchErr) {
+      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, fetchErr);
+      // Fetch failed — if we had nothing from cache, try harder to find any nearby data
+      if (!servedFromCache) {
+        const fallback = this._poiCacheFallback(cat, s, w, n, e);
+        if (fallback) this._renderPOILayer(cat, fallback);
+      }
     } finally {
       if (this._poiFetching) this._poiFetching[cat.key] = false;
       this._poiRingEnd(cat);
