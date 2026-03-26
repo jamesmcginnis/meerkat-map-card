@@ -222,13 +222,11 @@ class MeerkatMapCard extends HTMLElement {
         }
         #mm-poi-ring.mm-loading { opacity: 1; }
         #mm-poi-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-        #mm-poi-arc {
+        .mm-poi-seg {
           fill: none;
-          stroke: #007AFF;
           stroke-width: 3;
           stroke-linecap: round;
-          filter: drop-shadow(0 0 4px rgba(0,122,255,0.6));
-          transition: stroke-dashoffset 0.6s ease;
+          transition: stroke-dashoffset 0.5s ease;
         }
         .leaflet-attribution-container a { color: ${accent}; }
       </style>
@@ -250,7 +248,7 @@ class MeerkatMapCard extends HTMLElement {
             <div class="mm-spinner"></div>
             <span>Loading map…</span>
           </div>
-          <div id="mm-poi-ring"><svg><rect id="mm-poi-arc" rx="20"/></svg></div>
+          <div id="mm-poi-ring"><svg id="mm-poi-svg"></svg></div>
         </div>
       </ha-card>`;
 
@@ -653,7 +651,7 @@ class MeerkatMapCard extends HTMLElement {
 
     if (!this._poiFetching) this._poiFetching = {};
     this._poiFetching[cat.key] = true;
-    this._poiRingStart();
+    this._poiRingStart(cat);
     try {
       const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
       const _p   = window.location.protocol === 'https:' ? 'https:' : 'http:';
@@ -668,7 +666,7 @@ class MeerkatMapCard extends HTMLElement {
       console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
     } finally {
       if (this._poiFetching) this._poiFetching[cat.key] = false;
-      this._poiRingEnd();
+      this._poiRingEnd(cat);
     }
   }
 
@@ -821,46 +819,76 @@ class MeerkatMapCard extends HTMLElement {
     }
   }
 
-  // ── POI loading ring ─────────────────────────────────────────────
-  _poiRingStart() {
-    this._poiPending = (this._poiPending || 0) + 1;
+  // ── POI loading ring (colour-coded per category) ─────────────────
+  _poiRingStart(cat) {
+    if (!this._poiLoadState) this._poiLoadState = {};
+    this._poiLoadState[cat.key] = { color: cat.color, done: false };
     this._updatePoiRing();
   }
 
-  _poiRingEnd() {
-    this._poiPending = Math.max(0, (this._poiPending || 1) - 1);
+  _poiRingEnd(cat) {
+    if (this._poiLoadState && this._poiLoadState[cat.key]) {
+      this._poiLoadState[cat.key].done = true;
+    }
     this._updatePoiRing();
+    // Hide ring once all pending categories are done
+    const allDone = Object.values(this._poiLoadState || {}).every(s => s.done);
+    if (allDone) {
+      setTimeout(() => {
+        // Only hide if still all done (no new fetch started)
+        const stillDone = Object.values(this._poiLoadState || {}).every(s => s.done);
+        if (stillDone) {
+          const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
+          if (ring) ring.classList.remove('mm-loading');
+          this._poiLoadState = {};
+        }
+      }, 600); // brief pause so the completed ring is visible
+    }
   }
 
   _updatePoiRing() {
     const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
-    const arc  = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-arc');
-    if (!ring || !arc) return;
+    const svg  = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-svg');
+    if (!ring || !svg) return;
 
-    const total   = MM_POIS.filter(c => this._config && this._config[c.key]).length;
-    const pending = this._poiPending || 0;
-    const done    = Math.max(0, total - pending);
-
-    if (total === 0 || pending === 0) {
-      ring.classList.remove('mm-loading');
-      return;
-    }
+    const state = this._poiLoadState || {};
+    const cats  = Object.entries(state);
+    if (!cats.length) return;
 
     ring.classList.add('mm-loading');
 
     const w = ring.offsetWidth  || 300;
     const h = ring.offsetHeight || 400;
-    arc.setAttribute('width',  w);
-    arc.setAttribute('height', h);
-    arc.setAttribute('x', 0);
-    arc.setAttribute('y', 0);
+    svg.setAttribute('width',  w);
+    svg.setAttribute('height', h);
 
-    // Perimeter of the rounded rect
+    // Perimeter of the rounded rect border
     const r   = 20;
     const len = 2 * (w - 2*r) + 2 * (h - 2*r) + 2 * Math.PI * r;
-    const progress = done / total;
-    arc.style.strokeDasharray  = `${len}`;
-    arc.style.strokeDashoffset = `${len * (1 - progress)}`;
+    const segLen = len / cats.length;
+    const gap    = 4; // small gap between segments
+
+    // Rebuild SVG segments
+    svg.innerHTML = '';
+    cats.forEach(([key, s], i) => {
+      const offset = i * segLen;
+      // Background track (faint)
+      const track = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      track.setAttribute('x', 0); track.setAttribute('y', 0);
+      track.setAttribute('width', w); track.setAttribute('height', h);
+      track.setAttribute('rx', r);
+      track.style.cssText = `fill:none;stroke:${s.color};stroke-width:2;stroke-opacity:0.2;stroke-dasharray:${segLen - gap} ${len - (segLen - gap)};stroke-dashoffset:${-(offset)};stroke-linecap:round;`;
+      svg.appendChild(track);
+
+      // Filled arc (animates from empty to full when done)
+      const arc = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      arc.setAttribute('x', 0); arc.setAttribute('y', 0);
+      arc.setAttribute('width', w); arc.setAttribute('height', h);
+      arc.setAttribute('rx', r);
+      const fillLen = s.done ? segLen - gap : 0;
+      arc.style.cssText = `fill:none;stroke:${s.color};stroke-width:3;stroke-dasharray:${fillLen} ${len - fillLen};stroke-dashoffset:${-(offset)};stroke-linecap:round;filter:drop-shadow(0 0 3px ${s.color});transition:stroke-dasharray 0.5s ease;`;
+      svg.appendChild(arc);
+    });
   }
 }
 
