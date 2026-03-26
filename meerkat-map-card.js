@@ -27,18 +27,6 @@ async function _mmFetchCSS(url) {
   return text;
 }
 
-// ── POI tag matcher — maps overpass query patterns back to categories ─
-// Used after a batch fetch to split the unified result into per-category buckets.
-function _mmMatchesCat(cat, tags) {
-  const q = cat.overpass; // e.g. 'nwr["amenity"="hospital"]'
-  // Extract key and optional value from the overpass query string
-  const kv = q.match(/\["([^"]+)"(?:="([^"]+)")?\]/);
-  if (!kv) return false;
-  const [, key, val] = kv;
-  if (val) return tags[key] === val;
-  return key in tags; // key-only match (e.g. shop, leisure)
-}
-
 // ── POI Category Definitions ───────────────────────────────────────
 const MM_POIS = [
   { key: 'show_shops',          label: 'Shops',           emoji: '🛍️',  color: '#FF9500', overpass: 'nwr["shop"]',                     icon: 'M19,6H17C17,3.24 14.76,1 12,1C9.24,1 7,3.24 7,6H5C3.9,6 3,6.9 3,8V20C3,21.1 3.9,22 5,22H19C20.1,22 21,21.1 21,20V8C21,6.9 20.1,6 19,6M12,3C13.66,3 15,4.34 15,6H9C9,4.34 10.34,3 12,3M19,20H5V8H19V20Z' },
@@ -610,87 +598,61 @@ class MeerkatMapCard extends HTMLElement {
   // ── POI loading ───────────────────────────────────────────────────
   async _loadAllPOIs() {
     if (!this._mapInitialised || !this._map) return;
-    if (this._poiFetching && this._poiFetching._batch) return; // batch already in flight
-
     const bounds = this._map.getBounds();
     const s = bounds.getSouth(), w = bounds.getWest(), n = bounds.getNorth(), e = bounds.getEast();
 
-    // Remove layers for disabled categories
     for (const cat of MM_POIS) {
-      if (!this._config[cat.key] && this._poiLayers[cat.key]) {
-        this._map.removeLayer(this._poiLayers[cat.key]);
-        delete this._poiLayers[cat.key];
+      if (this._config[cat.key]) {
+        this._loadPOICategory(cat, s, w, n, e); // fire all in parallel, no await
+      } else {
+        if (this._poiLayers[cat.key]) {
+          this._map.removeLayer(this._poiLayers[cat.key]);
+          delete this._poiLayers[cat.key];
+        }
       }
     }
+  }
 
-    const enabled = MM_POIS.filter(c => this._config[c.key]);
-    if (!enabled.length) return;
+  _poiCacheKey(cat, s, w, n, e) {
+    return `mmPOI:${cat.key}:${(+s).toFixed(2)},${(+w).toFixed(2)},${(+n).toFixed(2)},${(+e).toFixed(2)}`;
+  }
 
-    // Cache key covers the full set of enabled categories + bounds
-    const bKey = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
-    const cacheKey = `mmPOIbatch:${enabled.map(c=>c.key).join(',')}:${bKey}`;
+  async _loadPOICategory(cat, s, w, n, e) {
+    if (this._poiFetching && this._poiFetching[cat.key]) return;
 
-    // Step 1: render from cache instantly if available
-    let needsFetch = true;
+    // Serve cached data instantly so map is never blank on reload
+    const cacheKey = this._poiCacheKey(cat, s, w, n, e);
     try {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
-        const { ts, byKey } = JSON.parse(cached);
+        const { ts, elements } = JSON.parse(cached);
         if (Date.now() - ts < 3600000) {
-          for (const cat of enabled) {
-            if (byKey[cat.key]) this._renderPOILayer(cat, byKey[cat.key]);
-          }
-          if (Date.now() - ts < 300000) return; // fresh enough, skip fetch
-          needsFetch = true;
+          this._renderPOILayer(cat, elements);
+          if (Date.now() - ts < 300000) return; // <5 min old, skip fetch
         }
       }
     } catch (_) {}
 
-    if (!needsFetch) return;
-
-    // Step 2: single Overpass request for all enabled categories
     if (!this._poiFetching) this._poiFetching = {};
-    this._poiFetching._batch = true;
+    this._poiFetching[cat.key] = true;
     try {
-      // Build a union query: each category gets its own statement, tagged with a special
-      // "mmkey" tag so we can split results back into per-category layers after the fetch.
-      // Overpass doesn't support result tagging so we use multiple named sets instead.
-      // Simpler approach: one union query, split by element tags post-fetch.
-      const stmts = enabled.map(c => `${c.overpass}(${s},${w},${n},${e});`).join('');
-      const query  = `[out:json][timeout:30];(${stmts});out center tags;`;
-      const _p     = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const url    = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-      const resp   = await fetch(url);
+      const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
+      const _p   = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const url  = `${_p}//overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+      const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data   = await resp.json();
+      const data = await resp.json();
       const elements = data.elements || [];
-
-      // Split elements into per-category buckets by matching overpass tag patterns
-      const byKey = {};
-      for (const cat of enabled) byKey[cat.key] = [];
-
-      for (const el of elements) {
-        const tags = el.tags || {};
-        for (const cat of enabled) {
-          if (_mmMatchesCat(cat, tags)) {
-            byKey[cat.key].push(el);
-            break; // assign to first matching category
-          }
-        }
-      }
-
-      // Cache and render
-      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), byKey })); } catch (_) {}
-      for (const cat of enabled) this._renderPOILayer(cat, byKey[cat.key] || []);
-
-    } catch (err) {
-      console.warn('[MeerkatMapCard] POI batch fetch failed:', err);
+      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
+      this._renderPOILayer(cat, elements);
+    } catch (e) {
+      console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
     } finally {
-      if (this._poiFetching) this._poiFetching._batch = false;
+      if (this._poiFetching) this._poiFetching[cat.key] = false;
     }
   }
 
-  _renderPOILayer(cat, elements) {
+    _renderPOILayer(cat, elements) {
     const L = window.L;
     const iconHTML = `
       <div style="
