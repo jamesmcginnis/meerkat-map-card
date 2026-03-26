@@ -1,6 +1,6 @@
 # Meerkat Map Card
 
-A custom Home Assistant Lovelace card that tracks a person entity on a live OpenStreetMap with an animated location marker, points of interest, what3words locations, and distance calculations.
+A custom Home Assistant Lovelace card that tracks a person entity on a live OpenStreetMap with an animated location marker, points of interest, address lookups, and distance calculations.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
@@ -11,11 +11,10 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 ## Features
 
 - **Live person tracking** — animated pulsing marker, colour-coded by zone (green = home, orange = away)
-- **Person popup** — tap the marker to see zone, last updated, GPS accuracy, battery, speed, altitude, full address, and what3words location
-- **Points of interest** — 12 categories fetched live from OpenStreetMap via Overpass API, cached in localStorage for instant reload
-- **POI popup** — tap any POI to see name, address, distance from person, what3words location, opening hours, phone, website, and more
+- **Person popup** — tap the marker to see zone, last updated, GPS accuracy, battery, speed, altitude, full address, and coordinates
+- **Points of interest** — 13 categories fetched live from OpenStreetMap via Overpass API, cached in localStorage for instant reload
+- **POI popup** — tap any POI to see name, address, distance from person, opening hours, phone, website, and more
 - **Distance measurement** — choose metric (km/m) or imperial (mi/yd) in the visual editor
-- **what3words** — tappable `///word.word.word` links in both person and POI popups, opens what3words.com
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
 - **Dark / Light / Auto theme**
 - **Full visual editor** — no YAML required
@@ -71,6 +70,7 @@ show_restaurants: false
 show_supermarkets: false
 show_schools: false
 show_parks: false
+show_toilets: false
 ```
 
 ### Options
@@ -95,6 +95,7 @@ show_parks: false
 |`show_supermarkets`  |bool  |`false` |🛒 Supermarkets                                                                                                                        |
 |`show_schools`       |bool  |`false` |🏫 Schools                                                                                                                             |
 |`show_parks`         |bool  |`false` |🌳 Parks                                                                                                                               |
+|`show_toilets`       |bool  |`false` |🚻 Toilets                                                                                                                             |
 
 -----
 
@@ -110,7 +111,6 @@ Tap the person marker to see:
 - Altitude
 - Coordinates
 - Full address (from geocoded sensor or Nominatim fallback)
-- what3words location (tappable ///word.word.word link)
 
 -----
 
@@ -129,7 +129,6 @@ Tapping a POI marker shows:
 - Cuisine (restaurants)
 - Wheelchair access
 - Distance from the tracked person
-- what3words location (tappable ///word.word.word link)
 
 -----
 
@@ -141,20 +140,11 @@ Without this option the card falls back to [Nominatim](https://nominatim.openstr
 
 -----
 
-## what3words
-
-Both the person popup and POI popups show a [what3words](https://what3words.com) address — a unique three-word combination identifying a 3 m × 3 m square anywhere on Earth. Tap the ///word.word.word link to open it in the what3words app or website.
-
-No API key is required.
-
------
-
 ## Privacy
 
 - Map tiles are loaded from [CARTO](https://carto.com/) (OpenStreetMap data)
 - POI data is fetched from the [Overpass API](https://overpass-api.de/) — only the visible map bounding box is sent
 - Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
-- what3words lookups use the [what3words public API](https://developer.what3words.com/) — only coordinates are sent
 - POI results are cached in your browser’s `localStorage` only
 - No analytics, no accounts, no tracking
 
