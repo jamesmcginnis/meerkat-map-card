@@ -347,13 +347,14 @@ class MeerkatMapCard extends HTMLElement {
         /* POI loading ring */
         /* POI loading ring — small circle, bottom-left corner */
         #mm-poi-ring {
-          position: absolute; bottom: 12px; left: 12px;
-          width: 36px; height: 36px;
+          position: absolute; bottom: 14px; left: 14px;
+          width: 28px; height: 28px;
           pointer-events: none; z-index: 1500;
-          opacity: 0; transition: opacity 0.6s ease;
+          opacity: 0;
+          transition: opacity 0.8s ease;
         }
         #mm-poi-ring.mm-loading { opacity: 1; }
-        #mm-poi-ring svg { width: 36px; height: 36px; transform: rotate(-90deg); }
+        #mm-poi-ring svg { width: 28px; height: 28px; transform: rotate(-90deg); display: block; }
         .leaflet-attribution-container a { color: ${accent}; }
       </style>
       <ha-card>
@@ -375,7 +376,16 @@ class MeerkatMapCard extends HTMLElement {
             <span>Loading map…</span>
           </div>
           <div id="mm-poi-ring">
-            <svg id="mm-poi-svg" viewBox="0 0 36 36"></svg>
+            <svg viewBox="0 0 28 28" fill="none">
+              <!-- track ring -->
+              <circle id="mm-ring-track" cx="14" cy="14" r="11"
+                stroke="rgba(255,255,255,0.12)" stroke-width="2.5" fill="none"/>
+              <!-- progress arc -->
+              <circle id="mm-ring-arc" cx="14" cy="14" r="11"
+                stroke="rgba(255,255,255,0.7)" stroke-width="2.5" fill="none"
+                stroke-linecap="round"
+                style="transition:stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1);"/>
+            </svg>
           </div>
         </div>
       </ha-card>`;
@@ -1003,7 +1013,7 @@ class MeerkatMapCard extends HTMLElement {
   // ── POI loading ring (colour-coded per category) ─────────────────
   _poiRingStart(cat) {
     if (!this._poiLoadState) this._poiLoadState = {};
-    this._poiLoadState[cat.key] = { color: cat.color, done: false };
+    this._poiLoadState[cat.key] = { done: false };
     this._updatePoiRing();
   }
 
@@ -1012,66 +1022,41 @@ class MeerkatMapCard extends HTMLElement {
       this._poiLoadState[cat.key].done = true;
     }
     this._updatePoiRing();
-    // Hide ring once all pending categories are done
     const allDone = Object.values(this._poiLoadState || {}).every(s => s.done);
     if (allDone) {
+      // Fill to 100% briefly, then fade out
+      this._updatePoiRing(1.0);
       setTimeout(() => {
-        // Only hide if still all done (no new fetch started)
         const stillDone = Object.values(this._poiLoadState || {}).every(s => s.done);
         if (stillDone) {
           const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
           if (ring) ring.classList.remove('mm-loading');
           this._poiLoadState = {};
         }
-      }, 600); // brief pause so the completed ring is visible
+      }, 900);
     }
   }
 
-  _updatePoiRing() {
+  _updatePoiRing(forceProgress) {
     const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
-    const svg  = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-svg');
-    if (!ring || !svg) return;
+    const arc  = this.shadowRoot && this.shadowRoot.getElementById('mm-ring-arc');
+    if (!ring || !arc) return;
 
     const state = this._poiLoadState || {};
-    const cats  = Object.entries(state);
+    const cats  = Object.values(state);
     if (!cats.length) return;
 
     ring.classList.add('mm-loading');
 
-    // Small circle: cx=18 cy=18 r=15, circumference ≈ 94.25
-    const cx = 18, cy = 18, radius = 15;
-    const circ = 2 * Math.PI * radius;
+    // r=11, circumference = 2π×11 ≈ 69.12
+    const circ = 2 * Math.PI * 11;
     const total = cats.length;
-    const gap = total > 1 ? 3 : 0; // gap between segments in px
-    const segLen = (circ - gap * total) / total;
+    const done  = forceProgress != null ? total : cats.filter(s => s.done).length;
+    const progress = total > 0 ? done / total : 0;
 
-    svg.innerHTML = '';
-
-    // Background circle track (faint grey)
-    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    bg.setAttribute('cx', cx); bg.setAttribute('cy', cy); bg.setAttribute('r', radius);
-    bg.style.cssText = 'fill:none;stroke:rgba(255,255,255,0.15);stroke-width:3;';
-    svg.appendChild(bg);
-
-    // One coloured arc per category
-    cats.forEach(([key, s], i) => {
-      const offset = -(i * (segLen + gap));
-      // Faint track for this segment
-      const track = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      track.setAttribute('cx', cx); track.setAttribute('cy', cy); track.setAttribute('r', radius);
-      track.style.cssText = `fill:none;stroke:${s.color};stroke-width:3;stroke-opacity:0.25;`
-        + `stroke-dasharray:${segLen} ${circ - segLen};stroke-dashoffset:${offset};stroke-linecap:round;`;
-      svg.appendChild(track);
-
-      // Filled arc — appears when done
-      const arc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      arc.setAttribute('cx', cx); arc.setAttribute('cy', cy); arc.setAttribute('r', radius);
-      const fill = s.done ? segLen : 0;
-      arc.style.cssText = `fill:none;stroke:${s.color};stroke-width:3;`
-        + `stroke-dasharray:${fill} ${circ - fill};stroke-dashoffset:${offset};stroke-linecap:round;`
-        + `transition:stroke-dasharray 0.5s ease;`;
-      svg.appendChild(arc);
-    });
+    // Update only the dasharray — element stays in DOM, transition fires smoothly
+    const filled = circ * progress;
+    arc.style.strokeDasharray = `${filled} ${circ - filled}`;
   }
 }
 
