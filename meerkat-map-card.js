@@ -739,10 +739,17 @@ class MeerkatMapCard extends HTMLElement {
     // Header
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;align-items:center;gap:14px;padding:10px 20px 14px;';
+    const website = tags.website || tags['contact:website'] || '';
+    const phone   = tags.phone   || tags['contact:phone']   || '';
+    const iconEl  = website
+      ? `<a href="${website}" target="_blank" rel="noopener" title="Open website" style="width:50px;height:50px;border-radius:14px;background:${cat.color}22;border:2px solid ${cat.color}44;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;text-decoration:none;">
+           <svg viewBox="0 0 24 24" width="24" height="24"><path d="${cat.icon}" fill="${cat.color}"/></svg>
+         </a>`
+      : `<div style="width:50px;height:50px;border-radius:14px;background:${cat.color}22;border:2px solid ${cat.color}44;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+           <svg viewBox="0 0 24 24" width="24" height="24"><path d="${cat.icon}" fill="${cat.color}"/></svg>
+         </div>`;
     header.innerHTML = `
-      <div style="width:50px;height:50px;border-radius:14px;background:${cat.color}22;border:2px solid ${cat.color}44;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path d="${cat.icon}" fill="${cat.color}"/></svg>
-      </div>
+      ${iconEl}
       <div style="flex:1;min-width:0;">
         <div style="font-size:17px;font-weight:700;letter-spacing:-0.2px;">${name}</div>
         <div style="font-size:12px;color:${subCol};margin-top:2px;">${cat.label}</div>
@@ -779,7 +786,13 @@ class MeerkatMapCard extends HTMLElement {
       }
     }
     if (tags.opening_hours)  addRow('Hours',   tags.opening_hours.replace(/;\s*/g, '\n'));
-    if (tags.phone || tags['contact:phone']) addRow('Phone', tags.phone || tags['contact:phone']);
+    if (phone) {
+      const phoneRow = document.createElement('div');
+      phoneRow.className = 'mm-info-row';
+      phoneRow.innerHTML = `<span class="mm-info-label">Phone</span>`
+        + `<span class="mm-info-value"><a href="tel:${phone}" style="color:${cat.color};text-decoration:none;font-weight:600;" onclick="event.preventDefault();if(confirm('Call ${phone}?'))window.location.href='tel:${phone}'">${phone}</a></span>`;
+      infoWrap.appendChild(phoneRow);
+    }
     if (tags.website || tags['contact:website']) addRow('Website', tags.website || tags['contact:website'], true);
     if (tags.brand)          addRow('Brand', tags.brand);
     if (tags.operator)       addRow('Operator', tags.operator);
