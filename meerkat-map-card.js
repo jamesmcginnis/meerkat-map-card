@@ -777,7 +777,11 @@ class MeerkatMapCard extends HTMLElement {
     if (tags.fee)            addRow('Fee', tags.fee);
     if (tags.network)        addRow('Network', tags.network);
     if (tags.ref)            addRow('Reference', tags.ref);
-    addRow('Coordinates', `${parseFloat(el.lat).toFixed(5)}, ${parseFloat(el.lon).toFixed(5)}`);
+    const cLat = el._lat != null ? el._lat : (el.center ? el.center.lat : el.lat);
+    const cLon = el._lon != null ? el._lon : (el.center ? el.center.lon : el.lon);
+    if (cLat != null && cLon != null && !isNaN(cLat) && !isNaN(cLon)) {
+      addRow('Coordinates', `${parseFloat(cLat).toFixed(5)}, ${parseFloat(cLon).toFixed(5)}`);
+    }
 
     if (!infoWrap.children.length) {
       infoWrap.innerHTML = `<div style="font-size:13px;color:${subCol};text-align:center;padding:16px 0;">No additional information available.</div>`;
