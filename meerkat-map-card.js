@@ -215,19 +215,15 @@ class MeerkatMapCard extends HTMLElement {
         /* Leaflet overrides inside shadow root */
         .leaflet-control-zoom { display: none !important; }
         /* POI loading ring */
+        /* POI loading ring — small circle, bottom-left corner */
         #mm-poi-ring {
-          position: absolute; inset: 0; border-radius: 20px;
+          position: absolute; bottom: 12px; left: 12px;
+          width: 36px; height: 36px;
           pointer-events: none; z-index: 1500;
-          opacity: 0; transition: opacity 0.4s ease;
+          opacity: 0; transition: opacity 0.6s ease;
         }
         #mm-poi-ring.mm-loading { opacity: 1; }
-        #mm-poi-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-        .mm-poi-seg {
-          fill: none;
-          stroke-width: 3;
-          stroke-linecap: round;
-          transition: stroke-dashoffset 0.5s ease;
-        }
+        #mm-poi-ring svg { width: 36px; height: 36px; transform: rotate(-90deg); }
         .leaflet-attribution-container a { color: ${accent}; }
       </style>
       <ha-card>
@@ -248,7 +244,9 @@ class MeerkatMapCard extends HTMLElement {
             <div class="mm-spinner"></div>
             <span>Loading map…</span>
           </div>
-          <div id="mm-poi-ring"><svg id="mm-poi-svg"></svg></div>
+          <div id="mm-poi-ring">
+            <svg id="mm-poi-svg" viewBox="0 0 36 36"></svg>
+          </div>
         </div>
       </ha-card>`;
 
@@ -857,36 +855,38 @@ class MeerkatMapCard extends HTMLElement {
 
     ring.classList.add('mm-loading');
 
-    const w = ring.offsetWidth  || 300;
-    const h = ring.offsetHeight || 400;
-    svg.setAttribute('width',  w);
-    svg.setAttribute('height', h);
+    // Small circle: cx=18 cy=18 r=15, circumference ≈ 94.25
+    const cx = 18, cy = 18, radius = 15;
+    const circ = 2 * Math.PI * radius;
+    const total = cats.length;
+    const gap = total > 1 ? 3 : 0; // gap between segments in px
+    const segLen = (circ - gap * total) / total;
 
-    // Perimeter of the rounded rect border
-    const r   = 20;
-    const len = 2 * (w - 2*r) + 2 * (h - 2*r) + 2 * Math.PI * r;
-    const segLen = len / cats.length;
-    const gap    = 4; // small gap between segments
-
-    // Rebuild SVG segments
     svg.innerHTML = '';
+
+    // Background circle track (faint grey)
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    bg.setAttribute('cx', cx); bg.setAttribute('cy', cy); bg.setAttribute('r', radius);
+    bg.style.cssText = 'fill:none;stroke:rgba(255,255,255,0.15);stroke-width:3;';
+    svg.appendChild(bg);
+
+    // One coloured arc per category
     cats.forEach(([key, s], i) => {
-      const offset = i * segLen;
-      // Background track (faint)
-      const track = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      track.setAttribute('x', 0); track.setAttribute('y', 0);
-      track.setAttribute('width', w); track.setAttribute('height', h);
-      track.setAttribute('rx', r);
-      track.style.cssText = `fill:none;stroke:${s.color};stroke-width:2;stroke-opacity:0.2;stroke-dasharray:${segLen - gap} ${len - (segLen - gap)};stroke-dashoffset:${-(offset)};stroke-linecap:round;`;
+      const offset = -(i * (segLen + gap));
+      // Faint track for this segment
+      const track = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      track.setAttribute('cx', cx); track.setAttribute('cy', cy); track.setAttribute('r', radius);
+      track.style.cssText = `fill:none;stroke:${s.color};stroke-width:3;stroke-opacity:0.25;`
+        + `stroke-dasharray:${segLen} ${circ - segLen};stroke-dashoffset:${offset};stroke-linecap:round;`;
       svg.appendChild(track);
 
-      // Filled arc (animates from empty to full when done)
-      const arc = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      arc.setAttribute('x', 0); arc.setAttribute('y', 0);
-      arc.setAttribute('width', w); arc.setAttribute('height', h);
-      arc.setAttribute('rx', r);
-      const fillLen = s.done ? segLen - gap : 0;
-      arc.style.cssText = `fill:none;stroke:${s.color};stroke-width:3;stroke-dasharray:${fillLen} ${len - fillLen};stroke-dashoffset:${-(offset)};stroke-linecap:round;filter:drop-shadow(0 0 3px ${s.color});transition:stroke-dasharray 0.5s ease;`;
+      // Filled arc — appears when done
+      const arc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      arc.setAttribute('cx', cx); arc.setAttribute('cy', cy); arc.setAttribute('r', radius);
+      const fill = s.done ? segLen : 0;
+      arc.style.cssText = `fill:none;stroke:${s.color};stroke-width:3;`
+        + `stroke-dasharray:${fill} ${circ - fill};stroke-dashoffset:${offset};stroke-linecap:round;`
+        + `transition:stroke-dasharray 0.5s ease;`;
       svg.appendChild(arc);
     });
   }
