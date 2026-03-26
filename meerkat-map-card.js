@@ -156,6 +156,7 @@ class MeerkatMapCard extends HTMLElement {
     }
     this._mapInitialised = false;
     this._mapIniting     = false;  // must reset or re-init is blocked
+    this._poiPending  = 0;
     this._mapCentredOnce = false;
     // Clear shadow DOM so _render() rebuilds the map container on reconnect
     this.shadowRoot.innerHTML = '';
@@ -213,6 +214,22 @@ class MeerkatMapCard extends HTMLElement {
         @keyframes mmSpin { to { transform: rotate(360deg); } }
         /* Leaflet overrides inside shadow root */
         .leaflet-control-zoom { display: none !important; }
+        /* POI loading ring */
+        #mm-poi-ring {
+          position: absolute; inset: 0; border-radius: 20px;
+          pointer-events: none; z-index: 1500;
+          opacity: 0; transition: opacity 0.4s ease;
+        }
+        #mm-poi-ring.mm-loading { opacity: 1; }
+        #mm-poi-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+        #mm-poi-arc {
+          fill: none;
+          stroke: #007AFF;
+          stroke-width: 3;
+          stroke-linecap: round;
+          filter: drop-shadow(0 0 4px rgba(0,122,255,0.6));
+          transition: stroke-dashoffset 0.6s ease;
+        }
         .leaflet-attribution-container a { color: ${accent}; }
       </style>
       <ha-card>
@@ -233,6 +250,7 @@ class MeerkatMapCard extends HTMLElement {
             <div class="mm-spinner"></div>
             <span>Loading map…</span>
           </div>
+          <div id="mm-poi-ring"><svg><rect id="mm-poi-arc" rx="20"/></svg></div>
         </div>
       </ha-card>`;
 
@@ -635,6 +653,7 @@ class MeerkatMapCard extends HTMLElement {
 
     if (!this._poiFetching) this._poiFetching = {};
     this._poiFetching[cat.key] = true;
+    this._poiRingStart();
     try {
       const query = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
       const _p   = window.location.protocol === 'https:' ? 'https:' : 'http:';
@@ -649,6 +668,7 @@ class MeerkatMapCard extends HTMLElement {
       console.warn(`[MeerkatMapCard] POI fetch failed for ${cat.key}:`, e);
     } finally {
       if (this._poiFetching) this._poiFetching[cat.key] = false;
+      this._poiRingEnd();
     }
   }
 
@@ -799,6 +819,48 @@ class MeerkatMapCard extends HTMLElement {
       this._activeOverlay.remove();
       this._activeOverlay = null;
     }
+  }
+
+  // ── POI loading ring ─────────────────────────────────────────────
+  _poiRingStart() {
+    this._poiPending = (this._poiPending || 0) + 1;
+    this._updatePoiRing();
+  }
+
+  _poiRingEnd() {
+    this._poiPending = Math.max(0, (this._poiPending || 1) - 1);
+    this._updatePoiRing();
+  }
+
+  _updatePoiRing() {
+    const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
+    const arc  = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-arc');
+    if (!ring || !arc) return;
+
+    const total   = MM_POIS.filter(c => this._config && this._config[c.key]).length;
+    const pending = this._poiPending || 0;
+    const done    = Math.max(0, total - pending);
+
+    if (total === 0 || pending === 0) {
+      ring.classList.remove('mm-loading');
+      return;
+    }
+
+    ring.classList.add('mm-loading');
+
+    const w = ring.offsetWidth  || 300;
+    const h = ring.offsetHeight || 400;
+    arc.setAttribute('width',  w);
+    arc.setAttribute('height', h);
+    arc.setAttribute('x', 0);
+    arc.setAttribute('y', 0);
+
+    // Perimeter of the rounded rect
+    const r   = 20;
+    const len = 2 * (w - 2*r) + 2 * (h - 2*r) + 2 * Math.PI * r;
+    const progress = done / total;
+    arc.style.strokeDasharray  = `${len}`;
+    arc.style.strokeDashoffset = `${len * (1 - progress)}`;
   }
 }
 
