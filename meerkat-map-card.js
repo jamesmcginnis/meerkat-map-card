@@ -808,10 +808,10 @@ class MeerkatMapCard extends HTMLElement {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
           const { ts, elements } = JSON.parse(cached);
-          if (Date.now() - ts < 3600000) {
+          if (Date.now() - ts < 172800000) {  // 48-hour cache TTL
             this._renderPOILayer(cat, elements);
             fromCache = true;
-            if (Date.now() - ts < 300000) continue; // fresh — skip fetch
+            if (Date.now() - ts < 3600000) continue; // <1 hour old — skip refetch
           }
         }
       } catch (_) {}
@@ -853,7 +853,7 @@ class MeerkatMapCard extends HTMLElement {
           const raw = localStorage.getItem(k);
           if (raw) {
             const { ts, elements } = JSON.parse(raw);
-            if (Date.now() - ts < 3600000) return elements;
+            if (Date.now() - ts < 172800000) return elements;
           }
         }
       }
