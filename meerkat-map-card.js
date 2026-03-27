@@ -381,22 +381,35 @@ class MeerkatMapCard extends HTMLElement {
           position: absolute; bottom: 12px; left: 12px;
           width: 56px; height: 56px;
           pointer-events: auto; z-index: 1500;
-          opacity: 1;
+          /* no opacity fade — always present */
         }
-        #mm-poi-ring svg {
-          position: absolute; inset: 0; width: 56px; height: 56px;
-          transform: rotate(-90deg);
-        }
-        #mm-ring-btn {
+        /* SVG ring layer — rotated so arc starts at top */
+        #mm-poi-ring > svg {
           position: absolute; inset: 0;
-          display: flex; align-items: center; justify-content: center;
-          background: none; border: none; cursor: pointer; padding: 0;
-          width: 56px; height: 56px; border-radius: 50%;
+          width: 56px; height: 56px;
+          transform: rotate(-90deg);
+          pointer-events: none;
         }
-        #mm-ring-btn svg { width: 18px; height: 18px; transform: none; }
+        /* Button sits inside the ring, centred, matches card ctrl aesthetic */
+        #mm-ring-btn {
+          position: absolute;
+          top: 50%; left: 50%;
+          transform: translate(-50%, -50%);
+          width: 32px; height: 32px;
+          border-radius: 50%;
+          border: none; cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          backdrop-filter: blur(20px) saturate(180%);
+          -webkit-backdrop-filter: blur(20px) saturate(180%);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+          transition: transform 0.15s;
+          padding: 0;
+        }
+        #mm-ring-btn:active { transform: translate(-50%,-50%) scale(0.88); }
+        #mm-ring-btn svg { width: 14px; height: 14px; display: block; flex-shrink: 0; }
         @keyframes mmRingPulse {
           0%, 100% { opacity: 1; }
-          50%       { opacity: 0.4; }
+          50%       { opacity: 0.35; }
         }
         #mm-poi-ring.mm-ring-loading #mm-ring-arc { animation: mmRingPulse 1.2s ease-in-out infinite; }
         #mm-poi-ring.mm-ring-success #mm-ring-arc { animation: mmRingPulse 0.6s ease-in-out 3; }
@@ -1299,7 +1312,8 @@ class MeerkatMapCard extends HTMLElement {
       arc.style.strokeDasharray = `0 ${circ}`;
       void arc.getBoundingClientRect();
       arc.style.transition = 'stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1)';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="#FFCC00"/></svg>';
+      btn.style.background = 'rgba(30,30,34,0.75)';
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="#FFCC00"/></svg>';
       btn.title = 'Stop loading';
       btn.onclick = () => { this._stopFetch(); };
 
@@ -1307,6 +1321,7 @@ class MeerkatMapCard extends HTMLElement {
       ring.classList.add('mm-ring-success');
       arc.setAttribute('stroke', '#34C759');
       arc.style.strokeDasharray = `${circ} 0`;
+      btn.style.background = 'rgba(30,30,34,0.75)';
       btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41-1.41L9,16.17z" fill="#34C759"/></svg>';
       btn.title = 'Refresh POI data';
       btn.onclick = () => { this._forceRefreshPOIs(); };
@@ -1319,14 +1334,16 @@ class MeerkatMapCard extends HTMLElement {
       ring.classList.add('mm-ring-error');
       arc.setAttribute('stroke', '#FF3B30');
       arc.style.strokeDasharray = `${circ * 0.3} ${circ * 0.7}`;
+      btn.style.background = 'rgba(30,30,34,0.75)';
       btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65,6.35A7.958,7.958,0,0,0,12,4C7.58,4,4,7.58,4,12s3.58,8,8,8,8-3.58,8-8H20A10,10,0,1,1,12,2a9.955,9.955,0,0,1,7.07,2.93L21,3V8H16L17.65,6.35Z" fill="#FF3B30"/></svg>';
       btn.title = 'Retry loading POI data';
       btn.onclick = () => { this._forceRefreshPOIs(); };
 
     } else { // idle
-      arc.setAttribute('stroke', 'rgba(255,255,255,0.5)');
+      arc.setAttribute('stroke', 'rgba(255,255,255,0.35)');
       arc.style.strokeDasharray = `${circ} 0`;
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65,6.35A7.958,7.958,0,0,0,12,4C7.58,4,4,7.58,4,12s3.58,8,8,8,8-3.58,8-8H20A10,10,0,1,1,12,2a9.955,9.955,0,0,1,7.07,2.93L21,3V8H16L17.65,6.35Z" fill="rgba(255,255,255,0.5)"/></svg>';
+      btn.style.background = 'rgba(30,30,34,0.75)';
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65,6.35A7.958,7.958,0,0,0,12,4C7.58,4,4,7.58,4,12s3.58,8,8,8,8-3.58,8-8H20A10,10,0,1,1,12,2a9.955,9.955,0,0,1,7.07,2.93L21,3V8H16L17.65,6.35Z" fill="rgba(255,255,255,0.55)"/></svg>';
       btn.title = 'Refresh POI data';
       btn.onclick = () => { this._forceRefreshPOIs(); };
     }
