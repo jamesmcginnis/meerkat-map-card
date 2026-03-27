@@ -35,7 +35,7 @@ All settings are configurable through the built-in visual editor — no YAML req
 - Person entity and geocoded location sensor
 - Map height and default zoom level
 - Dark / Light / Auto theme
-- Distance units (metric or imperial)
+- Distance units (km/m, mi/m, or mi/yd)
 - 53 POI category toggles organised into 7 groups
 
 ## Compatibility
