@@ -865,21 +865,27 @@ class MeerkatMapCard extends HTMLElement {
     const b   = this._map.getBounds();
     const vs  = b.getSouth(), vw = b.getWest(), vn = b.getNorth(), ve = b.getEast();
 
-    // Check whether all enabled categories are already cached for this viewport.
-    // If so, render from cache immediately with no network request or ring.
+    // Check whether all enabled categories are covered by any valid cache entry
+    // (exact key OR a nearby entry whose bounds contain the viewport centre).
+    // This handles the case where data was cached with padded bounds — the
+    // exact viewport key won't exist but the padded one will.
     const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
     const allCached = enabled.length > 0 && enabled.every(cat => {
+      // 1. Exact key match
       try {
         const key = this._poiCacheKey(cat, vs, vw, vn, ve);
         const raw = localStorage.getItem(key);
-        if (!raw) return false;
-        const { ts } = JSON.parse(raw);
-        return Date.now() - ts < 172800000;
-      } catch (_) { return false; }
+        if (raw) {
+          const { ts } = JSON.parse(raw);
+          if (Date.now() - ts < 172800000) return true;
+        }
+      } catch (_) {}
+      // 2. Nearby cache entry that covers this viewport
+      return this._poiCacheFallback(cat, vs, vw, vn, ve) !== null;
     });
 
     if (allCached) {
-      // Everything is cached — render instantly, no ring, no network
+      // Everything is covered by cache — render instantly, no ring, no network
       this._loadAllPOIs(vs, vw, vn, ve);
       return;
     }
