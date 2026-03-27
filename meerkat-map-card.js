@@ -297,11 +297,14 @@ class MeerkatMapCard extends HTMLElement {
     clearTimeout(this._poiDebounce);
     this._closeAllOverlays();
     if (this._map) {
-      // Save current position so we can restore it on reconnect
+      // Save current position and fetch bounds so we can restore them on reconnect.
+      // This prevents a spurious reload when switching WiFi↔4G causes a reconnect.
       try {
         const c = this._map.getCenter();
         const z = this._map.getZoom();
-        sessionStorage.setItem('mmMapPos', JSON.stringify({ lat: c.lat, lng: c.lng, zoom: z }));
+        const payload = { lat: c.lat, lng: c.lng, zoom: z };
+        if (this._lastFetchBounds) payload.bounds = this._lastFetchBounds;
+        sessionStorage.setItem('mmMapPos', JSON.stringify(payload));
       } catch (_) {}
       this._map.remove();
       this._map          = null;
@@ -557,8 +560,10 @@ class MeerkatMapCard extends HTMLElement {
       try {
         const saved = sessionStorage.getItem('mmMapPos');
         if (saved) {
-          const { lat: sLat, lng: sLng, zoom: sZoom } = JSON.parse(saved);
+          const { lat: sLat, lng: sLng, zoom: sZoom, bounds } = JSON.parse(saved);
           this._map.setView([sLat, sLng], sZoom);
+          // Restore fetch bounds so moveend skips a redundant reload at the same position
+          if (bounds) this._lastFetchBounds = bounds;
           restored = true;
         }
       } catch (_) {}
@@ -905,7 +910,10 @@ class MeerkatMapCard extends HTMLElement {
     const b   = this._map.getBounds();
     const vs  = b.getSouth(), vw = b.getWest(), vn = b.getNorth(), ve = b.getEast();
 
-    // Check whether all enabled categories are covered by any valid cache entry
+    // If fetch bounds were restored from a previous session at this same location,
+    // render from cache directly — no allCached scan needed.
+    // The moveend handler will have already skipped the reload if bounds match,
+    // but _prefetchPOIs is called on init before moveend fires.
     const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
     const allCached = enabled.length > 0 && enabled.every(cat => {
       try {
