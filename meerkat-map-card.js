@@ -309,6 +309,7 @@ class MeerkatMapCard extends HTMLElement {
     this._poiPending      = 0;
     this._lastFetchBounds = null;
     if (this._fetchAbortCtrl) { this._fetchAbortCtrl.abort(); this._fetchAbortCtrl = null; }
+    this._loadGen = 0; this._ringGen = 0;
     this._mapCentredOnce = false;
     // Clear shadow DOM so _render() rebuilds the map container on reconnect
     this.shadowRoot.innerHTML = '';
@@ -854,16 +855,25 @@ class MeerkatMapCard extends HTMLElement {
       return ap - bp;
     });
 
-    // Create/replace abort controller for this round of fetches
-    if (!this._fetchAbortCtrl || this._fetchAbortCtrl.signal.aborted) {
-      this._fetchAbortCtrl = new AbortController();
-    }
+    // Each load round gets a unique generation ID.
+    // The ring only responds to the current generation — aborted rounds
+    // are simply ignored, preventing counter confusion across pans.
+    this._loadGen = (this._loadGen || 0) + 1;
+    const gen = this._loadGen;
+
+    if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
+    this._fetchAbortCtrl = new AbortController();
     const signal = this._fetchAbortCtrl.signal;
+
+    // Reset ring for this generation
+    this._ringGen   = gen;
+    this._ringTotal = 0;
+    this._ringDone  = 0;
 
     // Batch into groups of 5 — one Overpass request per batch.
     const BATCH = 5;
     for (let i = 0; i < needsFetch.length; i += BATCH) {
-      this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e, signal);
+      this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e, signal, gen);
     }
   }
 
@@ -932,13 +942,13 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // ── Batch fetch: one Overpass request for up to 5 categories ─────────
-  async _loadPOIBatch(batch, s, w, n, e, signal) {
+  async _loadPOIBatch(batch, s, w, n, e, signal, gen) {
     // Guard: skip if all cats in this batch are already fetching
     if (!this._poiFetching) this._poiFetching = {};
     const toFetch = batch.filter(c => !this._poiFetching[c.key]);
     if (!toFetch.length) return;
     toFetch.forEach(c => { this._poiFetching[c.key] = true; });
-    this._poiRingStart(); // one ring increment per batch request
+    this._poiRingStart(gen); // one ring increment per batch request
 
     // Build union query — all category statements in one request
     const stmts  = toFetch.map(c => `${c.overpass}(${s},${w},${n},${e});`).join('');
@@ -968,18 +978,18 @@ class MeerkatMapCard extends HTMLElement {
         this._renderPOILayer(cat, els);
         if (this._poiFetching) this._poiFetching[cat.key] = false;
       });
-      this._poiRingEnd(); // one ring decrement per batch request
+      this._poiRingEnd(gen); // one ring decrement per batch request
     };
 
     const fail = () => {
       toFetch.forEach(cat => {
         if (this._poiFetching) this._poiFetching[cat.key] = false;
       });
-      this._poiRingEnd(); // one ring decrement per batch request
+      this._poiRingEnd(gen); // one ring decrement per batch request
     };
 
-    this._fetchOverpass(encodedQ, signal).then(finish).catch(err => {
-      if (err && err.name === 'AbortError') return; // silently ignore cancelled
+    this._fetchOverpass(encodedQ, signal).then(finish).catch(() => {
+      // Always call fail — ring uses generation so stale calls are ignored
       fail();
     });
   }
@@ -1015,10 +1025,17 @@ class MeerkatMapCard extends HTMLElement {
       `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
     ];
-    const tryFetch = url =>
-      fetch(url, opts)
-        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(d => d.elements || []);
+    const tryFetch = url => {
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 20000)
+      );
+      return Promise.race([
+        fetch(url, opts)
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(d => d.elements || []),
+        timeout
+      ]);
+    };
 
     if (this._haProxyAvailable) {
       // iOS: race all mirrors through the HA proxy simultaneously
@@ -1028,7 +1045,9 @@ class MeerkatMapCard extends HTMLElement {
       try {
         return await Promise.any(proxyUrls.map(tryFetch));
       } catch (e) {
-        if (e.name === 'AbortError') throw e;
+        // AggregateError means all mirrors failed or were aborted
+        if (signal && signal.aborted) throw new DOMException('', 'AbortError');
+        // Otherwise fall through to direct fetch
       }
     }
 
@@ -1198,34 +1217,32 @@ class MeerkatMapCard extends HTMLElement {
     }
   }
 
-  // ── POI loading ring (colour-coded per category) ─────────────────
   // ── POI loading ring ─────────────────────────────────────────────
-  // Tracks batches (not categories) — one increment per network request,
-  // one decrement on complete. Progress = batches done / total batches.
-  _poiRingStart() {
-    this._ringTotal   = (this._ringTotal   || 0) + 1;
-    this._ringDone    = (this._ringDone     || 0);
-    this._updatePoiRing();
+  // Uses a generation counter so that aborted/stale fetch callbacks
+  // from a previous pan never affect the current ring state.
+  _poiRingStart(gen) {
+    if (gen !== this._ringGen) return; // stale — ignore
+    this._ringTotal = (this._ringTotal || 0) + 1;
+    this._updatePoiRing(gen);
   }
 
-  _poiRingEnd() {
+  _poiRingEnd(gen) {
+    if (gen !== this._ringGen) return; // stale — ignore
     this._ringDone = (this._ringDone || 0) + 1;
-    this._updatePoiRing();
+    this._updatePoiRing(gen);
     if (this._ringDone >= this._ringTotal) {
-      // Hold at 100% briefly so the user sees completion, then fade out
       clearTimeout(this._ringFadeTimer);
       this._ringFadeTimer = setTimeout(() => {
-        if (this._ringDone >= this._ringTotal) {
+        if (gen === this._ringGen && this._ringDone >= this._ringTotal) {
           const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
           if (ring) ring.classList.remove('mm-loading');
-          this._ringTotal = 0;
-          this._ringDone  = 0;
         }
       }, 700);
     }
   }
 
-  _updatePoiRing() {
+  _updatePoiRing(gen) {
+    if (gen !== undefined && gen !== this._ringGen) return; // stale
     const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
     const arc  = this.shadowRoot && this.shadowRoot.getElementById('mm-ring-arc');
     if (!ring || !arc) return;
