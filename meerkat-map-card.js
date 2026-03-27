@@ -376,17 +376,31 @@ class MeerkatMapCard extends HTMLElement {
         @keyframes mmSpin { to { transform: rotate(360deg); } }
         /* Leaflet overrides inside shadow root */
         .leaflet-control-zoom { display: none !important; }
-        /* POI loading ring */
-        /* POI loading ring — small circle, bottom-left corner */
+        /* POI status ring — always visible, bottom-left */
         #mm-poi-ring {
-          position: absolute; bottom: 14px; left: 14px;
-          width: 28px; height: 28px;
-          pointer-events: none; z-index: 1500;
-          opacity: 0;
-          transition: opacity 0.8s ease;
+          position: absolute; bottom: 12px; left: 12px;
+          width: 56px; height: 56px;
+          pointer-events: auto; z-index: 1500;
+          opacity: 1;
         }
-        #mm-poi-ring.mm-loading { opacity: 1; }
-        #mm-poi-ring svg { width: 28px; height: 28px; transform: rotate(-90deg); display: block; }
+        #mm-poi-ring svg {
+          position: absolute; inset: 0; width: 56px; height: 56px;
+          transform: rotate(-90deg);
+        }
+        #mm-ring-btn {
+          position: absolute; inset: 0;
+          display: flex; align-items: center; justify-content: center;
+          background: none; border: none; cursor: pointer; padding: 0;
+          width: 56px; height: 56px; border-radius: 50%;
+        }
+        #mm-ring-btn svg { width: 18px; height: 18px; transform: none; }
+        @keyframes mmRingPulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.4; }
+        }
+        #mm-poi-ring.mm-ring-loading #mm-ring-arc { animation: mmRingPulse 1.2s ease-in-out infinite; }
+        #mm-poi-ring.mm-ring-success #mm-ring-arc { animation: mmRingPulse 0.6s ease-in-out 3; }
+        #mm-poi-ring.mm-ring-error   #mm-ring-arc { animation: mmRingPulse 0.5s ease-in-out infinite; }
         .leaflet-attribution-container a { color: ${accent}; }
       </style>
       <ha-card>
@@ -408,21 +422,23 @@ class MeerkatMapCard extends HTMLElement {
             <span>Loading map…</span>
           </div>
           <div id="mm-poi-ring">
-            <svg viewBox="0 0 28 28" fill="none">
-              <!-- track ring -->
-              <circle id="mm-ring-track" cx="14" cy="14" r="11"
-                stroke="rgba(255,255,255,0.12)" stroke-width="2.5" fill="none"/>
-              <!-- progress arc -->
-              <circle id="mm-ring-arc" cx="14" cy="14" r="11"
-                stroke="rgba(255,255,255,0.7)" stroke-width="2.5" fill="none"
+            <svg viewBox="0 0 56 56" fill="none">
+              <circle id="mm-ring-track" cx="28" cy="28" r="22"
+                stroke="rgba(255,255,255,0.15)" stroke-width="3" fill="none"/>
+              <circle id="mm-ring-arc" cx="28" cy="28" r="22"
+                stroke="rgba(255,255,255,0.8)" stroke-width="3" fill="none"
                 stroke-linecap="round"
                 style="transition:stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1);"/>
             </svg>
+            <button id="mm-ring-btn" title="Refresh POI data">
+              <!-- icon injected by JS -->
+            </button>
           </div>
         </div>
       </ha-card>`;
 
     this._applyTheme();
+    setTimeout(() => this._setRingState('idle'), 0);
 
     // Ctrl buttons
     const homeBtn    = this.shadowRoot.getElementById('mm-home-btn');
@@ -532,6 +548,9 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
+        // Re-render POI layers from cache immediately so they appear
+        // before any network fetch completes (fixes WiFi→4G disappearance)
+        this._restorePOIsFromCache();
         setTimeout(() => this._prefetchPOIs(), 600);
       });
 
@@ -942,6 +961,29 @@ class MeerkatMapCard extends HTMLElement {
     await this._loadAllPOIs(s, w, n, e);
   }
 
+  // Re-render all enabled POI layers from cache immediately after map rebuild.
+  // Called on reconnect (WiFi→4G etc.) before any network fetch so markers
+  // appear instantly rather than waiting for the Overpass response.
+  _restorePOIsFromCache() {
+    if (!this._mapInitialised || !this._map) return;
+    const b = this._map.getBounds();
+    const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
+    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+    for (const cat of enabled) {
+      // Skip if already rendered
+      if (this._poiLayers[cat.key]) continue;
+      const exact = (() => {
+        try {
+          const raw = localStorage.getItem(this._poiCacheKey(cat, s, w, n, e));
+          if (raw) { const { ts, elements } = JSON.parse(raw); if (Date.now()-ts<172800000) return elements; }
+        } catch(_){}
+        return null;
+      })();
+      const elements = exact || this._poiCacheFallback(cat, s, w, n, e);
+      if (elements) this._renderPOILayer(cat, elements);
+    }
+  }
+
   _poiCacheKey(cat, s, w, n, e) {
     // toFixed(3) ≈ 110m grid — fine enough to reuse when zoomed into a street
     return `mmPOI:${cat.key}:${(+s).toFixed(3)},${(+w).toFixed(3)},${(+n).toFixed(3)},${(+e).toFixed(3)}`;
@@ -1014,7 +1056,7 @@ class MeerkatMapCard extends HTMLElement {
       toFetch.forEach(cat => {
         if (this._poiFetching) this._poiFetching[cat.key] = false;
       });
-      this._poiRingEnd(gen); // one ring decrement per batch request
+      this._poiRingEnd(gen, true); // failed
     };
 
     this._fetchOverpass(encodedQ, signal).then(finish).catch(() => {
@@ -1232,54 +1274,116 @@ class MeerkatMapCard extends HTMLElement {
   // ── POI loading ring ─────────────────────────────────────────────
   // Uses a generation counter so that aborted/stale fetch callbacks
   // from a previous pan never affect the current ring state.
+  // ── POI status ring ───────────────────────────────────────────────
+  // States: idle (white), loading (yellow+pulse), success (green+pulse→idle), error (red+pulse)
+  // r=22, circumference = 2π×22 ≈ 138.23
+  static get _RING_CIRC() { return 2 * Math.PI * 22; }
+
+  _ringEl()  { return this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring'); }
+  _arcEl()   { return this.shadowRoot && this.shadowRoot.getElementById('mm-ring-arc'); }
+  _btnEl()   { return this.shadowRoot && this.shadowRoot.getElementById('mm-ring-btn'); }
+
+  _setRingState(state) {
+    // state: 'idle' | 'loading' | 'success' | 'error'
+    this._ringState = state;
+    const ring = this._ringEl(), arc = this._arcEl(), btn = this._btnEl();
+    if (!ring || !arc || !btn) return;
+
+    ring.classList.remove('mm-ring-loading', 'mm-ring-success', 'mm-ring-error');
+    const circ = MeerkatMapCard._RING_CIRC;
+
+    if (state === 'loading') {
+      ring.classList.add('mm-ring-loading');
+      arc.setAttribute('stroke', '#FFCC00');
+      arc.style.transition = 'none';
+      arc.style.strokeDasharray = `0 ${circ}`;
+      void arc.getBoundingClientRect();
+      arc.style.transition = 'stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1)';
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="#FFCC00"/></svg>';
+      btn.title = 'Stop loading';
+      btn.onclick = () => { this._stopFetch(); };
+
+    } else if (state === 'success') {
+      ring.classList.add('mm-ring-success');
+      arc.setAttribute('stroke', '#34C759');
+      arc.style.strokeDasharray = `${circ} 0`;
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41-1.41L9,16.17z" fill="#34C759"/></svg>';
+      btn.title = 'Refresh POI data';
+      btn.onclick = () => { this._forceRefreshPOIs(); };
+      clearTimeout(this._ringFadeTimer);
+      this._ringFadeTimer = setTimeout(() => {
+        if (this._ringState === 'success') this._setRingState('idle');
+      }, 2000);
+
+    } else if (state === 'error') {
+      ring.classList.add('mm-ring-error');
+      arc.setAttribute('stroke', '#FF3B30');
+      arc.style.strokeDasharray = `${circ * 0.3} ${circ * 0.7}`;
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65,6.35A7.958,7.958,0,0,0,12,4C7.58,4,4,7.58,4,12s3.58,8,8,8,8-3.58,8-8H20A10,10,0,1,1,12,2a9.955,9.955,0,0,1,7.07,2.93L21,3V8H16L17.65,6.35Z" fill="#FF3B30"/></svg>';
+      btn.title = 'Retry loading POI data';
+      btn.onclick = () => { this._forceRefreshPOIs(); };
+
+    } else { // idle
+      arc.setAttribute('stroke', 'rgba(255,255,255,0.5)');
+      arc.style.strokeDasharray = `${circ} 0`;
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65,6.35A7.958,7.958,0,0,0,12,4C7.58,4,4,7.58,4,12s3.58,8,8,8,8-3.58,8-8H20A10,10,0,1,1,12,2a9.955,9.955,0,0,1,7.07,2.93L21,3V8H16L17.65,6.35Z" fill="rgba(255,255,255,0.5)"/></svg>';
+      btn.title = 'Refresh POI data';
+      btn.onclick = () => { this._forceRefreshPOIs(); };
+    }
+  }
+
+  _stopFetch() {
+    if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
+    this._poiFetching = {};
+    this._ringTotal = 0; this._ringDone = 0;
+    this._setRingState('idle');
+  }
+
+  _forceRefreshPOIs() {
+    this._lastFetchBounds = null; // force refetch ignoring bounds cache
+    this._poiFetching = {};
+    this._loadAllPOIs();
+  }
+
   _poiRingStart(gen) {
-    if (gen !== this._ringGen) return; // stale — ignore
+    if (gen !== this._ringGen) return;
     this._ringTotal = (this._ringTotal || 0) + 1;
     this._updatePoiRing(gen);
   }
 
-  _poiRingEnd(gen) {
-    if (gen !== this._ringGen) return; // stale — ignore
+  _poiRingEnd(gen, failed) {
+    if (gen !== this._ringGen) return;
     this._ringDone = (this._ringDone || 0) + 1;
+    if (failed) this._ringFailed = (this._ringFailed || 0) + 1;
     this._updatePoiRing(gen);
-    if (this._ringDone >= this._ringTotal) {
-      clearTimeout(this._ringFadeTimer);
-      this._ringFadeTimer = setTimeout(() => {
-        if (gen === this._ringGen && this._ringDone >= this._ringTotal) {
-          const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
-          if (ring) ring.classList.remove('mm-loading');
-        }
-      }, 700);
-    }
   }
 
   _updatePoiRing(gen) {
-    if (gen !== undefined && gen !== this._ringGen) return; // stale
-    const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
-    const arc  = this.shadowRoot && this.shadowRoot.getElementById('mm-ring-arc');
-    if (!ring || !arc) return;
+    if (gen !== undefined && gen !== this._ringGen) return;
+    const arc = this._arcEl();
+    if (!arc) return;
 
     const total = this._ringTotal || 0;
     const done  = this._ringDone  || 0;
     if (total === 0) return;
 
-    ring.classList.add('mm-loading');
-
-    // r=11, circumference = 2π×11 ≈ 69.12
-    const circ     = 2 * Math.PI * 11;
+    const circ     = MeerkatMapCard._RING_CIRC;
     const progress = done / total;
     const filled   = circ * progress;
 
-    // First call in a new cycle: reset arc to empty without transition
-    if (done === 0) {
-      arc.style.transition = 'none';
-      arc.style.strokeDasharray = `0 ${circ}`;
-      // Force reflow so the reset takes effect before re-enabling transition
-      void arc.getBoundingClientRect();
-      arc.style.transition = 'stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1)';
-    }
-
+    if (this._ringState !== 'loading') this._setRingState('loading');
     arc.style.strokeDasharray = `${filled} ${circ - filled}`;
+
+    if (done >= total) {
+      clearTimeout(this._ringFadeTimer);
+      const allFailed = this._ringFailed >= total;
+      this._ringFailed = 0;
+      this._ringFadeTimer = setTimeout(() => {
+        if (gen === this._ringGen) {
+          this._setRingState(allFailed ? 'error' : 'success');
+        }
+      }, 300);
+    }
   }
 }
 
