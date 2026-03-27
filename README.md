@@ -34,7 +34,6 @@ Click the button above, or:
 3. Install **Meerkat Map Card**
 4. Refresh your browser
 
-> **Note:** HACS requires at least one GitHub release to be published before the install button works. If you see an error, check that a release exists in the repository.
 
 ### Manual
 
@@ -121,9 +120,12 @@ The card includes several optimisations to minimise load time:
 
 - Up to 5 categories are batched into a single network request
 - Three Overpass mirrors are raced simultaneously — the fastest response wins
+- Each mirror has a 20-second timeout so a slow server never blocks the others
 - A 25% expanded area is fetched on first load so short pans are already cached
 - Zooming in never triggers a refetch — the data is already loaded
-- Panning to a new area cancels any in-flight requests for the old location
+- Panning to a new area immediately cancels in-flight requests for the old location
+- A 1.5-second pause after panning avoids wasted fetches mid-drag
+- Stale fetch callbacks from previous locations are ignored — the loading ring can never get stuck
 
 The 53 categories are organised into 7 groups in the visual editor:
 
