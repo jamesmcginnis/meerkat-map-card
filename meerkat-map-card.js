@@ -1023,23 +1023,6 @@ class MeerkatMapCard extends HTMLElement {
     const primaryUrl = `https://overpass-api.de/api/interpreter?data=${encodedQ}`;
     const haProxyUrl = `/api/hass_web_proxy/v0/?url=${encodeURIComponent(primaryUrl)}`;
 
-    // Check proxy availability once per session — result persisted in sessionStorage
-    // to avoid a HEAD round-trip on every page load
-    if (this._haProxyAvailable === undefined) {
-      const stored = sessionStorage.getItem('mmHAProxy');
-      if (stored !== null) {
-        this._haProxyAvailable = stored === '1';
-      } else {
-        try {
-          const probe = await fetch('/api/hass_web_proxy/v0/', { method: 'HEAD' });
-          this._haProxyAvailable = probe.status !== 404;
-        } catch (_) {
-          this._haProxyAvailable = false;
-        }
-        sessionStorage.setItem('mmHAProxy', this._haProxyAvailable ? '1' : '0');
-      }
-    }
-
     const opts = { signal };
     const mirrorUrls = [
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
@@ -1058,21 +1041,21 @@ class MeerkatMapCard extends HTMLElement {
       ]);
     };
 
-    if (this._haProxyAvailable) {
-      // iOS: race all mirrors through the HA proxy simultaneously
-      const proxyUrls = mirrorUrls.map(
-        u => `/api/hass_web_proxy/v0/?url=${encodeURIComponent(u)}`
-      );
-      try {
-        return await Promise.any(proxyUrls.map(tryFetch));
-      } catch (e) {
-        // AggregateError means all mirrors failed or were aborted
-        if (signal && signal.aborted) throw new DOMException('', 'AbortError');
-        // Otherwise fall through to direct fetch
-      }
+    // Always try the HA proxy first — it works on iOS and is same-origin so
+    // never blocked. We probe lazily (first actual data fetch) rather than
+    // a separate HEAD request, so a network switch never leaves a stale
+    // "proxy unavailable" flag from a failed check during reconnection.
+    const proxyUrls = mirrorUrls.map(
+      u => `/api/hass_web_proxy/v0/?url=${encodeURIComponent(u)}`
+    );
+    try {
+      return await Promise.any(proxyUrls.map(tryFetch));
+    } catch (e) {
+      if (signal && signal.aborted) throw new DOMException('', 'AbortError');
+      // Proxy not installed or all proxy attempts failed — fall back to direct
     }
 
-    // Desktop: race all mirrors directly
+    // Fallback: race mirrors directly (works on desktop, blocked on iOS without proxy)
     return await Promise.any(mirrorUrls.map(tryFetch));
   }
 
