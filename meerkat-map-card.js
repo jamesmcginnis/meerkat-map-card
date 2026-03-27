@@ -495,16 +495,20 @@ class MeerkatMapCard extends HTMLElement {
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
         clearTimeout(this._poiDebounce);
+        // 1500ms debounce — gives the user time to keep dragging before
+        // we start a fetch, reducing wasted requests mid-pan
         this._poiDebounce = setTimeout(() => {
-          // Skip reload if the current view is fully contained within
-          // the bounds we last fetched — zooming in never needs new data
           const b = this._map.getBounds();
           const f = this._lastFetchBounds;
+          // Skip if new view is fully inside the last fetched area (zoom in / tiny pan)
           if (f &&
               b.getSouth() >= f.s && b.getNorth() <= f.n &&
               b.getWest()  >= f.w && b.getEast()  <= f.e) return;
+          // Clear any in-flight guards — old fetches for the previous location
+          // must not block the new area from loading
+          this._poiFetching = {};
           this._loadAllPOIs();
-        }, 600);
+        }, 1500);
       });
 
       // Hide loading overlay
@@ -782,10 +786,19 @@ class MeerkatMapCard extends HTMLElement {
   // ── POI loading ───────────────────────────────────────────────────
   async _loadAllPOIs(ps, pw, pn, pe) {
     if (!this._mapInitialised || !this._map) return;
-    // Accept pre-computed bounds (from _prefetchPOIs) or read from map
+    // Accept pre-computed bounds (from _prefetchPOIs) or compute from map.
+    // When computing from map, add a 15% buffer so short pans after this
+    // fetch don't immediately trigger another load.
     const bounds = this._map.getBounds();
-    const s = ps ?? bounds.getSouth(), w = pw ?? bounds.getWest();
-    const n = pn ?? bounds.getNorth(), e = pe ?? bounds.getEast();
+    let s, w, n, e;
+    if (ps !== undefined) {
+      s = ps; w = pw; n = pn; e = pe;
+    } else {
+      const latPad = (bounds.getNorth() - bounds.getSouth()) * 0.15;
+      const lngPad = (bounds.getEast()  - bounds.getWest())  * 0.15;
+      s = bounds.getSouth() - latPad; n = bounds.getNorth() + latPad;
+      w = bounds.getWest()  - lngPad; e = bounds.getEast()  + lngPad;
+    }
 
     // Remove layers for disabled categories
     for (const cat of MM_POIS) {
@@ -813,7 +826,7 @@ class MeerkatMapCard extends HTMLElement {
           if (Date.now() - ts < 172800000) {  // 48-hour cache TTL
             this._renderPOILayer(cat, elements);
             fromCache = true;
-            if (Date.now() - ts < 3600000) continue; // <1 hour old — skip refetch
+            continue; // valid cache — no network request needed
           }
         }
       } catch (_) {}
