@@ -6,21 +6,22 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=meerkat-map-card&category=plugin)
 
------
+---
 
 ## Features
 
 - **Live person tracking** — animated pulsing marker, colour-coded by zone (green = home, orange = away)
 - **Person popup** — tap the marker to see zone, last updated, GPS accuracy, battery, speed, altitude, full address, and coordinates
-- **Points of interest** — 53 categories across 7 groups, fetched from OpenStreetMap via Overpass API, cached in localStorage
+- **Points of interest** — 53 categories across 7 groups, fetched from OpenStreetMap via Overpass API
+- **Smart POI caching** — results cached for 48 hours; revisiting a location loads instantly with no network request
 - **POI popup** — tap any POI to see name, address, distance from person, opening hours, phone (tappable to call), website (icon clickable), and more
 - **Distance measurement** — choose metric (km/m) or imperial (mi/yd) in the visual editor
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
 - **Dark / Light / Auto theme**
 - **Full visual editor** — no YAML required
-- **iOS compatible** — works in the HA companion app on iPhone and iPad with the optional proxy integration (see below)
+- **iOS compatible** — works in the HA companion app on iPhone and iPad with the proxy integration (see below)
 
------
+---
 
 ## Installation
 
@@ -29,46 +30,51 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 Click the button above, or:
 
 1. In HACS → Frontend, click the three-dot menu → **Custom repositories**
-1. Add `https://github.com/jamesmcginnis/meerkat-map-card` with category **Frontend**
-1. Install **Meerkat Map Card**
-1. Refresh your browser
+2. Add `https://github.com/jamesmcginnis/meerkat-map-card` with category **Frontend**
+3. Install **Meerkat Map Card**
+4. Refresh your browser
 
 > **Note:** HACS requires at least one GitHub release to be published before the install button works. If you see an error, check that a release exists in the repository.
 
 ### Manual
 
 1. Download `meerkat-map-card.js` from this repository
-1. Copy it to `/config/www/meerkat-map-card.js`
-1. In Home Assistant → Settings → Dashboards → Resources, add:
-- URL: `/local/meerkat-map-card.js`
-- Type: JavaScript module
-1. Refresh your browser
+2. Copy it to `/config/www/meerkat-map-card.js`
+3. In Home Assistant → Settings → Dashboards → Resources, add:
+   - URL: `/local/meerkat-map-card.js`
+   - Type: JavaScript module
+4. Refresh your browser
 
------
+---
 
 ## iOS Setup — Points of Interest
 
-> ⚠️ **iPhone and iPad users:** The iOS Home Assistant companion app blocks direct requests to external APIs (including the Overpass API used for POI data). Without the steps below, points of interest will not load on any iPhone or iPad that does not already have them cached.
+> ⚠️ **iPhone and iPad users:** The iOS Home Assistant companion app blocks direct requests to external APIs including the Overpass API used for POI data. Without the steps below, points of interest will not load on any iPhone or iPad that does not already have them cached.
 
-To fix this, install the **Home Assistant Web Proxy** integration, which routes Overpass requests through your HA server instead of the browser. The card detects it automatically — no card configuration needed.
+To fix this, install the **Home Assistant Web Proxy** integration. It routes Overpass requests through your HA server so the browser never touches external APIs directly. The card detects it automatically — no card configuration needed.
 
 ### Step 1 — Install the proxy integration via HACS
 
 1. In HACS → **Integrations** (not Frontend), click the three-dot menu → **Custom repositories**
-1. Add `https://github.com/dermotduffy/hass-web-proxy-integration` with category **Integration**
-1. Install **Home Assistant Web Proxy**
-1. Restart Home Assistant
+2. Add `https://github.com/dermotduffy/hass-web-proxy-integration` with category **Integration**
+3. Install **Home Assistant Web Proxy**
+4. Restart Home Assistant
 
-### Step 2 — Add the Overpass URL pattern
+### Step 2 — Add the Overpass URL patterns
+
+The card races three Overpass mirrors simultaneously and uses whichever responds first. Add all three to get the fastest possible load times:
 
 1. Settings → Devices & Services → find **Home Assistant Web Proxy** → **Configure**
-1. Click **+ ADD**
-1. Enter `https://overpass-api.de/*` as the URL pattern
-1. Click **Save**
+2. Click **+ ADD** and enter `https://overpass-api.de/*`
+3. Click **+ ADD** again and enter `https://overpass.kumi.systems/*`
+4. Click **+ ADD** again and enter `https://maps.mail.ru/*`
+5. Click **Save**
 
-No restart needed after step 2. The card will automatically use the proxy on iOS and fall back to a direct connection on desktop browsers.
+No restart needed after step 2. The card automatically uses the proxy on iOS and falls back to direct connections on desktop.
 
------
+> **Why three mirrors?** Each is an independent Overpass server in a different location. By racing them simultaneously the card uses whichever responds fastest at that moment, significantly reducing load times compared to relying on a single server.
+
+---
 
 ## Configuration
 
@@ -92,24 +98,32 @@ show_supermarkets: true
 
 ### Options
 
-|Option           |Type  |Default |Description                                                                                                                           |
-|-----------------|------|--------|--------------------------------------------------------------------------------------------------------------------------------------|
-|`person_entity`  |string|—       |Entity ID of the person or device tracker to display                                                                                  |
-|`geocoded_entity`|string|—       |Optional. HA companion app geocoded location sensor for full address inc. house number (e.g. `sensor.sarahs_iphone_geocoded_location`)|
-|`theme`          |string|`dark`  |Map colour scheme: `dark`, `light`, or `auto`                                                                                         |
-|`map_height`     |number|`420`   |Height of the map in pixels                                                                                                           |
-|`zoom_level`     |number|`15`    |Default zoom level (1–20)                                                                                                             |
-|`distance_unit`  |string|`metric`|Distance units in POI popups: `metric` (km/m) or `imperial` (mi/yd)                                                                   |
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `person_entity` | string | — | Entity ID of the person or device tracker to display |
+| `geocoded_entity` | string | — | Optional. HA companion app geocoded location sensor for full address inc. house number (e.g. `sensor.sarahs_iphone_geocoded_location`) |
+| `theme` | string | `dark` | Map colour scheme: `dark`, `light`, or `auto` |
+| `map_height` | number | `420` | Height of the map in pixels |
+| `zoom_level` | number | `15` | Default zoom level (1–20) |
+| `distance_unit` | string | `metric` | Distance units in POI popups: `metric` (km/m) or `imperial` (mi/yd) |
 
 For a full list of the 53 POI `show_*` keys, see the visual editor — all categories are listed there with toggles.
 
------
+---
 
 ## Points of Interest
 
-> ⚠️ **Performance note:** It is not recommended to enable too many POI categories at once, especially on mobile. Each enabled category makes a separate network request to the Overpass API. Enabling many categories simultaneously will slow down the card significantly and may cause some to fail to load. Stick to a small number of the most useful categories for the best experience.
+> ⚠️ **Performance note:** Enable only a small number of POI categories at once, especially on mobile. Each batch of up to 5 categories uses one network request — enabling more increases load time. Stick to the categories most useful to you for the best experience.
 
-POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/). Results are cached in `localStorage` for 1 hour — after the first load, the map reloads instantly from cache on subsequent visits.
+POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) and cached in `localStorage` for 48 hours. Returning to a location you have visited before loads instantly from cache with no network request and no loading indicator.
+
+The card includes several optimisations to minimise load time:
+
+- Up to 5 categories are batched into a single network request
+- Three Overpass mirrors are raced simultaneously — the fastest response wins
+- A 25% expanded area is fetched on first load so short pans are already cached
+- Zooming in never triggers a refetch — the data is already loaded
+- Panning to a new area cancels any in-flight requests for the old location
 
 The 53 categories are organised into 7 groups in the visual editor:
 
@@ -126,7 +140,7 @@ Tapping a POI marker shows its name, address, opening hours, phone number (tap t
 
 **Enabled by default:** Train Stations, Bus Stops, Hospitals, Pharmacies, Supermarkets.
 
------
+---
 
 ## Person Popup
 
@@ -141,7 +155,7 @@ Tap the person marker to see:
 - Coordinates
 - Full address (from geocoded sensor or Nominatim fallback)
 
------
+---
 
 ## Geocoded Location Sensor
 
@@ -149,26 +163,26 @@ The `geocoded_entity` option is the most reliable way to display a full address 
 
 Without this option the card falls back to [Nominatim](https://nominatim.openstreetmap.org/) reverse geocoding, which may omit the house number for some residential addresses.
 
------
+---
 
 ## Privacy
 
 - Map tiles are loaded from [CARTO](https://carto.com/) (OpenStreetMap data)
-- POI data is fetched from the [Overpass API](https://overpass-api.de/) — only the visible map bounding box is sent
+- POI data is fetched from the [Overpass API](https://overpass-api.de/) and two public mirrors — only the visible map bounding box is sent, no personal data
 - Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
-- POI results are cached in your browser’s `localStorage` only
+- POI results are cached in your browser's `localStorage` only — nothing is sent to any third party beyond the API calls above
 - No analytics, no accounts, no tracking
 
------
+---
 
 ## Requirements
 
 - Home Assistant 2023.1.0 or later
 - A `person` entity or device tracker with `latitude` and `longitude` attributes
-- For POI loading on iOS: [Home Assistant Web Proxy](https://github.com/dermotduffy/hass-web-proxy-integration) (HACS integration, free)
+- For POI loading on iPhone and iPad: [Home Assistant Web Proxy](https://github.com/dermotduffy/hass-web-proxy-integration) (free HACS integration)
 
------
+---
 
 ## License
 
-MIT — see <LICENSE.md>
+MIT — see [LICENSE.md](LICENSE.md)
