@@ -22,6 +22,12 @@ The person marker is colour-coded by zone — green when home, orange when away.
 
 Tap any POI marker to see its name, address, opening hours, phone (tap to call), website, and distance from the tracked person.
 
+## iPhone and iPad
+
+The iOS companion app blocks direct requests to external APIs, which prevents points of interest from loading on devices with no cached data. To fix this, install the free **Home Assistant Web Proxy** integration via HACS (Integrations), then add `https://overpass-api.de/*` as an allowed URL pattern in its configuration. The card detects the proxy automatically — no card configuration is needed.
+
+See the [README](README.md) for full setup steps.
+
 ## Visual editor
 
 All settings are configurable through the built-in visual editor — no YAML required. Options include:
@@ -34,4 +40,4 @@ All settings are configurable through the built-in visual editor — no YAML req
 
 ## Compatibility
 
-Works on desktop browsers and the iOS/Android Home Assistant companion app.
+Works on desktop browsers and the iOS/Android Home Assistant companion app. iPhone and iPad require the Home Assistant Web Proxy integration for POI loading (see above).
