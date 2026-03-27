@@ -27,6 +27,18 @@ async function _mmFetchCSS(url) {
   return text;
 }
 
+// ── Tag matcher: assigns batch-fetched elements back to categories ──
+// Called after a single batch response to split the flat element list
+// into per-category buckets. Most-specific category in MM_POIS wins.
+function _mmCatMatches(cat, tags) {
+  const q = cat.overpass; // e.g. 'nwr["amenity"="hospital"]'
+  // Extract key and optional value from the overpass query string
+  const kv = q.match(/\["([^"]+)"(?:="([^"]+)")?\]/);
+  if (!kv) return false;
+  const [, key, val] = kv;
+  return val ? tags[key] === val : key in tags;
+}
+
 // ── POI Category Definitions ───────────────────────────────────────
 const MM_POI_GROUPS = [
   {
@@ -294,7 +306,8 @@ class MeerkatMapCard extends HTMLElement {
     }
     this._mapInitialised = false;
     this._mapIniting     = false;  // must reset or re-init is blocked
-    this._poiPending  = 0;
+    this._poiPending      = 0;
+    this._lastFetchBounds = null;
     this._mapCentredOnce = false;
     // Clear shadow DOM so _render() rebuilds the map container on reconnect
     this.shadowRoot.innerHTML = '';
@@ -482,7 +495,16 @@ class MeerkatMapCard extends HTMLElement {
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
         clearTimeout(this._poiDebounce);
-        this._poiDebounce = setTimeout(() => this._loadAllPOIs(), 800);
+        this._poiDebounce = setTimeout(() => {
+          // Skip reload if the current view is fully contained within
+          // the bounds we last fetched — zooming in never needs new data
+          const b = this._map.getBounds();
+          const f = this._lastFetchBounds;
+          if (f &&
+              b.getSouth() >= f.s && b.getNorth() <= f.n &&
+              b.getWest()  >= f.w && b.getEast()  <= f.e) return;
+          this._loadAllPOIs();
+        }, 600);
       });
 
       // Hide loading overlay
@@ -763,15 +785,51 @@ class MeerkatMapCard extends HTMLElement {
     const bounds = this._map.getBounds();
     const s = bounds.getSouth(), w = bounds.getWest(), n = bounds.getNorth(), e = bounds.getEast();
 
+    // Remove layers for disabled categories
     for (const cat of MM_POIS) {
-      if (this._config[cat.key]) {
-        this._loadPOICategory(cat, s, w, n, e); // fire all in parallel, no await
-      } else {
-        if (this._poiLayers[cat.key]) {
-          this._map.removeLayer(this._poiLayers[cat.key]);
-          delete this._poiLayers[cat.key];
-        }
+      if (!this._config[cat.key] && this._poiLayers[cat.key]) {
+        this._map.removeLayer(this._poiLayers[cat.key]);
+        delete this._poiLayers[cat.key];
       }
+    }
+
+    const enabled = MM_POIS.filter(c => this._config[c.key]);
+    if (!enabled.length) return;
+
+    // Record bounds at fetch time so moveend can skip redundant reloads
+    this._lastFetchBounds = { s, w, n, e };
+
+    // Step 1: render any cached data instantly for all enabled categories
+    const needsFetch = [];
+    for (const cat of enabled) {
+      const cacheKey = this._poiCacheKey(cat, s, w, n, e);
+      let fromCache = false;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          const { ts, elements } = JSON.parse(cached);
+          if (Date.now() - ts < 3600000) {
+            this._renderPOILayer(cat, elements);
+            fromCache = true;
+            if (Date.now() - ts < 300000) continue; // fresh — skip fetch
+          }
+        }
+      } catch (_) {}
+      if (!fromCache) {
+        const fb = this._poiCacheFallback(cat, s, w, n, e);
+        if (fb) this._renderPOILayer(cat, fb);
+      }
+      needsFetch.push(cat);
+    }
+
+    if (!needsFetch.length) return;
+
+    // Step 2: batch categories into groups of 5 — one Overpass request per batch.
+    // This reduces round trips from N to ceil(N/5), e.g. 5 defaults = 1 request.
+    const BATCH = 5;
+    for (let i = 0; i < needsFetch.length; i += BATCH) {
+      const batch = needsFetch.slice(i, i + BATCH);
+      this._loadPOIBatch(batch, s, w, n, e);
     }
   }
 
@@ -790,7 +848,6 @@ class MeerkatMapCard extends HTMLElement {
         const parts = k.slice(prefix.length).split(',');
         if (parts.length !== 4) continue;
         const [cs, cw, cn, ce] = parts.map(Number);
-        // Use this cache entry if it covers the current view centre
         const midLat = (s + n) / 2, midLng = (w + e) / 2;
         if (midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce) {
           const raw = localStorage.getItem(k);
@@ -804,59 +861,53 @@ class MeerkatMapCard extends HTMLElement {
     return null;
   }
 
-  async _loadPOICategory(cat, s, w, n, e) {
-    if (this._poiFetching && this._poiFetching[cat.key]) return;
-
-    // Step 1: exact cache hit → render immediately
-    const cacheKey = this._poiCacheKey(cat, s, w, n, e);
-    let servedFromCache = false;
-    try {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const { ts, elements } = JSON.parse(cached);
-        if (Date.now() - ts < 3600000) {
-          this._renderPOILayer(cat, elements);
-          servedFromCache = true;
-          // Still refresh in background if >5 min old
-          if (Date.now() - ts < 300000) return;
-        }
-      }
-    } catch (_) {}
-
-    // Step 2: no exact hit — try nearby cache to show something while fetching
-    if (!servedFromCache) {
-      const fallback = this._poiCacheFallback(cat, s, w, n, e);
-      if (fallback) { this._renderPOILayer(cat, fallback); servedFromCache = true; }
-    }
-
-    // Step 3: fetch Overpass data
-    // Strategy (tried in order):
-    //   A) hass-web-proxy-integration HACS proxy — zero config, works on iOS
-    //   B) Direct fetch to primary Overpass endpoint
-    //   C) Direct fetch to fallback Overpass mirrors
+  // ── Batch fetch: one Overpass request for up to 5 categories ─────────
+  async _loadPOIBatch(batch, s, w, n, e) {
+    // Guard: skip if all cats in this batch are already fetching
     if (!this._poiFetching) this._poiFetching = {};
-    this._poiFetching[cat.key] = true;
-    this._poiRingStart(cat);
+    const toFetch = batch.filter(c => !this._poiFetching[c.key]);
+    if (!toFetch.length) return;
+    toFetch.forEach(c => { this._poiFetching[c.key] = true; this._poiRingStart(c); });
 
-    const query    = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
+    // Build union query — all category statements in one request
+    const stmts  = toFetch.map(c => `${c.overpass}(${s},${w},${n},${e});`).join('');
+    const query  = `[out:json][timeout:30];(${stmts});out center tags;`;
     const encodedQ = encodeURIComponent(query);
 
-    const onSuccess = (elements) => {
-      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
-      this._renderPOILayer(cat, elements);
-      if (this._poiFetching) this._poiFetching[cat.key] = false;
-      this._poiRingEnd(cat);
-    };
-    const onFail = () => {
-      if (!servedFromCache) {
-        const fb = this._poiCacheFallback(cat, s, w, n, e);
-        if (fb) this._renderPOILayer(cat, fb);
+    const finish = (elements) => {
+      // Split the flat results back into per-category buckets by tag matching
+      const byKey = {};
+      toFetch.forEach(c => { byKey[c.key] = []; });
+
+      for (const el of elements) {
+        const tags = el.tags || {};
+        // Assign to the FIRST matching category (most specific wins — order in MM_POIS matters)
+        for (const cat of toFetch) {
+          if (_mmCatMatches(cat, tags)) {
+            byKey[cat.key].push(el);
+            break;
+          }
+        }
       }
-      if (this._poiFetching) this._poiFetching[cat.key] = false;
-      this._poiRingEnd(cat);
+
+      toFetch.forEach(cat => {
+        const els = byKey[cat.key] || [];
+        const cacheKey = this._poiCacheKey(cat, s, w, n, e);
+        try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements: els })); } catch (_) {}
+        this._renderPOILayer(cat, els);
+        if (this._poiFetching) this._poiFetching[cat.key] = false;
+        this._poiRingEnd(cat);
+      });
     };
 
-    this._fetchOverpass(encodedQ).then(onSuccess).catch(onFail);
+    const fail = () => {
+      toFetch.forEach(cat => {
+        if (this._poiFetching) this._poiFetching[cat.key] = false;
+        this._poiRingEnd(cat);
+      });
+    };
+
+    this._fetchOverpass(encodedQ).then(finish).catch(fail);
   }
 
   // ── Multi-strategy Overpass fetcher ───────────────────────────────
