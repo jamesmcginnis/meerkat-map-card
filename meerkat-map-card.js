@@ -297,6 +297,12 @@ class MeerkatMapCard extends HTMLElement {
     clearTimeout(this._poiDebounce);
     this._closeAllOverlays();
     if (this._map) {
+      // Save current position so we can restore it on reconnect
+      try {
+        const c = this._map.getCenter();
+        const z = this._map.getZoom();
+        sessionStorage.setItem('mmMapPos', JSON.stringify({ lat: c.lat, lng: c.lng, zoom: z }));
+      } catch (_) {}
       this._map.remove();
       this._map          = null;
       this._tileLayer    = null;
@@ -544,9 +550,19 @@ class MeerkatMapCard extends HTMLElement {
     const lng = parseFloat(state.attributes?.longitude);
     if (isNaN(lat) || isNaN(lng)) return;
 
-    // Centre on first load
+    // On first load: restore last saved position if available,
+    // otherwise centre on the person
     if (!this._mapCentredOnce) {
-      this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
+      let restored = false;
+      try {
+        const saved = sessionStorage.getItem('mmMapPos');
+        if (saved) {
+          const { lat: sLat, lng: sLng, zoom: sZoom } = JSON.parse(saved);
+          this._map.setView([sLat, sLng], sZoom);
+          restored = true;
+        }
+      } catch (_) {}
+      if (!restored) this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
       this._mapCentredOnce = true;
     }
 
