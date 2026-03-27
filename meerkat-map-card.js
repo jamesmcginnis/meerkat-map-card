@@ -862,13 +862,34 @@ class MeerkatMapCard extends HTMLElement {
   // when the user pans a short distance the data is already cached.
   async _prefetchPOIs() {
     if (!this._mapInitialised || !this._map) return;
-    const b = this._map.getBounds();
-    const latPad = (b.getNorth() - b.getSouth()) * 0.25;
-    const lngPad = (b.getEast()  - b.getWest())  * 0.25;
-    const s = b.getSouth() - latPad, n = b.getNorth() + latPad;
-    const w = b.getWest()  - lngPad, e = b.getEast()  + lngPad;
-    // Store expanded bounds as last fetch bounds so moveend skips
-    // redundant reloads for small pans as well as zooms
+    const b   = this._map.getBounds();
+    const vs  = b.getSouth(), vw = b.getWest(), vn = b.getNorth(), ve = b.getEast();
+
+    // Check whether all enabled categories are already cached for this viewport.
+    // If so, render from cache immediately with no network request or ring.
+    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+    const allCached = enabled.length > 0 && enabled.every(cat => {
+      try {
+        const key = this._poiCacheKey(cat, vs, vw, vn, ve);
+        const raw = localStorage.getItem(key);
+        if (!raw) return false;
+        const { ts } = JSON.parse(raw);
+        return Date.now() - ts < 172800000;
+      } catch (_) { return false; }
+    });
+
+    if (allCached) {
+      // Everything is cached — render instantly, no ring, no network
+      this._loadAllPOIs(vs, vw, vn, ve);
+      return;
+    }
+
+    // First load or stale cache — fetch with 25% expanded bounds so short
+    // pans after this are also covered by the cache
+    const latPad = (vn - vs) * 0.25;
+    const lngPad = (ve - vw) * 0.25;
+    const s = vs - latPad, n = vn + latPad;
+    const w = vw - lngPad, e = ve + lngPad;
     this._lastFetchBounds = { s, w, n, e };
     await this._loadAllPOIs(s, w, n, e);
   }
