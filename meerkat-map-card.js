@@ -894,7 +894,8 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._poiFetching) this._poiFetching = {};
     const toFetch = batch.filter(c => !this._poiFetching[c.key]);
     if (!toFetch.length) return;
-    toFetch.forEach(c => { this._poiFetching[c.key] = true; this._poiRingStart(c); });
+    toFetch.forEach(c => { this._poiFetching[c.key] = true; });
+    this._poiRingStart(); // one ring increment per batch request
 
     // Build union query — all category statements in one request
     const stmts  = toFetch.map(c => `${c.overpass}(${s},${w},${n},${e});`).join('');
@@ -923,15 +924,15 @@ class MeerkatMapCard extends HTMLElement {
         try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements: els })); } catch (_) {}
         this._renderPOILayer(cat, els);
         if (this._poiFetching) this._poiFetching[cat.key] = false;
-        this._poiRingEnd(cat);
       });
+      this._poiRingEnd(); // one ring decrement per batch request
     };
 
     const fail = () => {
       toFetch.forEach(cat => {
         if (this._poiFetching) this._poiFetching[cat.key] = false;
-        this._poiRingEnd(cat);
       });
+      this._poiRingEnd(); // one ring decrement per batch request
     };
 
     this._fetchOverpass(encodedQ).then(finish).catch(fail);
@@ -1155,51 +1156,57 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // ── POI loading ring (colour-coded per category) ─────────────────
-  _poiRingStart(cat) {
-    if (!this._poiLoadState) this._poiLoadState = {};
-    this._poiLoadState[cat.key] = { done: false };
+  // ── POI loading ring ─────────────────────────────────────────────
+  // Tracks batches (not categories) — one increment per network request,
+  // one decrement on complete. Progress = batches done / total batches.
+  _poiRingStart() {
+    this._ringTotal   = (this._ringTotal   || 0) + 1;
+    this._ringDone    = (this._ringDone     || 0);
     this._updatePoiRing();
   }
 
-  _poiRingEnd(cat) {
-    if (this._poiLoadState && this._poiLoadState[cat.key]) {
-      this._poiLoadState[cat.key].done = true;
-    }
+  _poiRingEnd() {
+    this._ringDone = (this._ringDone || 0) + 1;
     this._updatePoiRing();
-    const allDone = Object.values(this._poiLoadState || {}).every(s => s.done);
-    if (allDone) {
-      // Fill to 100% briefly, then fade out
-      this._updatePoiRing(1.0);
-      setTimeout(() => {
-        const stillDone = Object.values(this._poiLoadState || {}).every(s => s.done);
-        if (stillDone) {
+    if (this._ringDone >= this._ringTotal) {
+      // Hold at 100% briefly so the user sees completion, then fade out
+      clearTimeout(this._ringFadeTimer);
+      this._ringFadeTimer = setTimeout(() => {
+        if (this._ringDone >= this._ringTotal) {
           const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
           if (ring) ring.classList.remove('mm-loading');
-          this._poiLoadState = {};
+          this._ringTotal = 0;
+          this._ringDone  = 0;
         }
-      }, 900);
+      }, 700);
     }
   }
 
-  _updatePoiRing(forceProgress) {
+  _updatePoiRing() {
     const ring = this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring');
     const arc  = this.shadowRoot && this.shadowRoot.getElementById('mm-ring-arc');
     if (!ring || !arc) return;
 
-    const state = this._poiLoadState || {};
-    const cats  = Object.values(state);
-    if (!cats.length) return;
+    const total = this._ringTotal || 0;
+    const done  = this._ringDone  || 0;
+    if (total === 0) return;
 
     ring.classList.add('mm-loading');
 
     // r=11, circumference = 2π×11 ≈ 69.12
-    const circ = 2 * Math.PI * 11;
-    const total = cats.length;
-    const done  = forceProgress != null ? total : cats.filter(s => s.done).length;
-    const progress = total > 0 ? done / total : 0;
+    const circ     = 2 * Math.PI * 11;
+    const progress = done / total;
+    const filled   = circ * progress;
 
-    // Update only the dasharray — element stays in DOM, transition fires smoothly
-    const filled = circ * progress;
+    // First call in a new cycle: reset arc to empty without transition
+    if (done === 0) {
+      arc.style.transition = 'none';
+      arc.style.strokeDasharray = `0 ${circ}`;
+      // Force reflow so the reset takes effect before re-enabling transition
+      void arc.getBoundingClientRect();
+      arc.style.transition = 'stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1)';
+    }
+
     arc.style.strokeDasharray = `${filled} ${circ - filled}`;
   }
 }
