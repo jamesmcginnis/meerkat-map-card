@@ -516,7 +516,7 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
-        setTimeout(() => this._loadAllPOIs(), 600);
+        setTimeout(() => this._prefetchPOIs(), 600);
       });
 
     } catch (e) {
@@ -780,10 +780,12 @@ class MeerkatMapCard extends HTMLElement {
 
 
   // ── POI loading ───────────────────────────────────────────────────
-  async _loadAllPOIs() {
+  async _loadAllPOIs(ps, pw, pn, pe) {
     if (!this._mapInitialised || !this._map) return;
+    // Accept pre-computed bounds (from _prefetchPOIs) or read from map
     const bounds = this._map.getBounds();
-    const s = bounds.getSouth(), w = bounds.getWest(), n = bounds.getNorth(), e = bounds.getEast();
+    const s = ps ?? bounds.getSouth(), w = pw ?? bounds.getWest();
+    const n = pn ?? bounds.getNorth(), e = pe ?? bounds.getEast();
 
     // Remove layers for disabled categories
     for (const cat of MM_POIS) {
@@ -796,7 +798,7 @@ class MeerkatMapCard extends HTMLElement {
     const enabled = MM_POIS.filter(c => this._config[c.key]);
     if (!enabled.length) return;
 
-    // Record bounds at fetch time so moveend can skip redundant reloads
+    // Update last fetch bounds (used by moveend to skip redundant reloads)
     this._lastFetchBounds = { s, w, n, e };
 
     // Step 1: render any cached data instantly for all enabled categories
@@ -824,13 +826,38 @@ class MeerkatMapCard extends HTMLElement {
 
     if (!needsFetch.length) return;
 
-    // Step 2: batch categories into groups of 5 — one Overpass request per batch.
-    // This reduces round trips from N to ceil(N/5), e.g. 5 defaults = 1 request.
+    // Step 2: sort so default-on categories go in the first batch — users see
+    // important POIs (hospitals, bus stops etc.) before optional ones.
+    const DEFAULT_KEYS = new Set([
+      'show_supermarkets','show_train_stations','show_bus_stops',
+      'show_hospitals','show_pharmacies'
+    ]);
+    needsFetch.sort((a, b) => {
+      const ap = DEFAULT_KEYS.has(a.key) ? 0 : 1;
+      const bp = DEFAULT_KEYS.has(b.key) ? 0 : 1;
+      return ap - bp;
+    });
+
+    // Batch into groups of 5 — one Overpass request per batch.
     const BATCH = 5;
     for (let i = 0; i < needsFetch.length; i += BATCH) {
-      const batch = needsFetch.slice(i, i + BATCH);
-      this._loadPOIBatch(batch, s, w, n, e);
+      this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e);
     }
+  }
+
+  // On initial map load, fetch a slightly larger area (~25% padding) so that
+  // when the user pans a short distance the data is already cached.
+  async _prefetchPOIs() {
+    if (!this._mapInitialised || !this._map) return;
+    const b = this._map.getBounds();
+    const latPad = (b.getNorth() - b.getSouth()) * 0.25;
+    const lngPad = (b.getEast()  - b.getWest())  * 0.25;
+    const s = b.getSouth() - latPad, n = b.getNorth() + latPad;
+    const w = b.getWest()  - lngPad, e = b.getEast()  + lngPad;
+    // Store expanded bounds as last fetch bounds so moveend skips
+    // redundant reloads for small pans as well as zooms
+    this._lastFetchBounds = { s, w, n, e };
+    await this._loadAllPOIs(s, w, n, e);
   }
 
   _poiCacheKey(cat, s, w, n, e) {
@@ -918,14 +945,20 @@ class MeerkatMapCard extends HTMLElement {
     const primaryUrl = `https://overpass-api.de/api/interpreter?data=${encodedQ}`;
     const haProxyUrl = `/api/hass_web_proxy/v0/?url=${encodeURIComponent(primaryUrl)}`;
 
-    // Check once if the proxy is available and cache the result
+    // Check proxy availability once per session — result persisted in sessionStorage
+    // to avoid a HEAD round-trip on every page load
     if (this._haProxyAvailable === undefined) {
-      try {
-        const probe = await fetch('/api/hass_web_proxy/v0/', { method: 'HEAD' });
-        // 404 = HA is up but proxy not installed; 405/200/302 = proxy is present
-        this._haProxyAvailable = probe.status !== 404;
-      } catch (_) {
-        this._haProxyAvailable = false;
+      const stored = sessionStorage.getItem('mmHAProxy');
+      if (stored !== null) {
+        this._haProxyAvailable = stored === '1';
+      } else {
+        try {
+          const probe = await fetch('/api/hass_web_proxy/v0/', { method: 'HEAD' });
+          this._haProxyAvailable = probe.status !== 404;
+        } catch (_) {
+          this._haProxyAvailable = false;
+        }
+        sessionStorage.setItem('mmHAProxy', this._haProxyAvailable ? '1' : '0');
       }
     }
 
