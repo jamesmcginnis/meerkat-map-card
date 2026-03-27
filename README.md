@@ -15,7 +15,7 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 - **Points of interest** — 53 categories across 7 groups, fetched from OpenStreetMap via Overpass API
 - **Smart POI caching** — results cached for 48 hours; revisiting a location loads instantly with no network request
 - **POI popup** — tap any POI to see name, address, distance from person, opening hours, phone (tappable to call), website (icon clickable), and more
-- **Distance measurement** — choose metric (km/m) or imperial (mi/yd) in the visual editor
+- **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
 - **Dark / Light / Auto theme**
 - **Full visual editor** — no YAML required
@@ -104,7 +104,7 @@ show_supermarkets: true
 | `theme` | string | `dark` | Map colour scheme: `dark`, `light`, or `auto` |
 | `map_height` | number | `420` | Height of the map in pixels |
 | `zoom_level` | number | `15` | Default zoom level (1–20) |
-| `distance_unit` | string | `metric` | Distance units in POI popups: `metric` (km/m) or `imperial` (mi/yd) |
+| `distance_unit` | string | `metric` | Distance units in POI popups: `metric` (km/m), `mixed` (mi/m), or `imperial` (mi/yd) |
 
 For a full list of the 53 POI `show_*` keys, see the visual editor — all categories are listed there with toggles.
 
