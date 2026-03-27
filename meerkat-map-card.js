@@ -697,6 +697,11 @@ class MeerkatMapCard extends HTMLElement {
       const miles = metres / 1609.344;
       return miles < 0.1 ? `${Math.round(metres * 1.09361)} yd` : `${miles.toFixed(1)} mi`;
     }
+    if (unit === 'mixed') {
+      // Miles for distance, metres for short distances
+      const miles = metres / 1609.344;
+      return miles < 0.1 ? `${Math.round(metres)} m` : `${miles.toFixed(1)} mi`;
+    }
     return metres < 1000 ? `${Math.round(metres)} m` : `${(metres/1000).toFixed(1)} km`;
   }
 
@@ -1423,6 +1428,7 @@ class MeerkatMapCardEditor extends HTMLElement {
               <label>Distance Units</label>
               <div class="segmented" style="margin-top:4px;">
                 <input type="radio" name="dist" id="dist_metric"   value="metric"   ${(cfg.distance_unit||'metric')==='metric'   ? 'checked':''}><label for="dist_metric">km / m</label>
+                <input type="radio" name="dist" id="dist_mixed"    value="mixed"    ${cfg.distance_unit==='mixed'    ? 'checked':''}><label for="dist_mixed">mi / m</label>
                 <input type="radio" name="dist" id="dist_imperial" value="imperial" ${cfg.distance_unit==='imperial' ? 'checked':''}><label for="dist_imperial">mi / yd</label>
               </div>
             </div>
