@@ -1018,31 +1018,35 @@ class MeerkatMapCard extends HTMLElement {
     // Build list of URLs to race — proxy first (required for iOS),
     // then public mirrors in parallel. First valid response wins.
     const opts = { signal };
-    const directUrls = [
+    const mirrorUrls = [
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
     ];
 
+    // Helper: fetch one URL and return parsed elements, or throw
+    const tryFetch = (url) =>
+      fetch(url, opts)
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(d => d.elements || []);
+
     if (this._haProxyAvailable) {
-      // On iOS the proxy is the only route that works — use it alone
+      // iOS (and desktop with proxy installed): race all mirrors through the
+      // HA proxy simultaneously. Each is still same-origin so iOS allows them.
+      // Whichever Overpass server responds first wins.
+      const proxyUrls = mirrorUrls.map(
+        u => `/api/hass_web_proxy/v0/?url=${encodeURIComponent(u)}`
+      );
       try {
-        const r = await fetch(haProxyUrl, opts);
-        if (r.ok) return (await r.json()).elements || [];
+        return await Promise.any(proxyUrls.map(tryFetch));
       } catch (e) {
         if (e.name === 'AbortError') throw e;
+        // All proxy attempts failed — fall through to direct fetch on desktop
       }
     }
 
-    // Desktop: race all mirrors simultaneously — use whichever responds first
-    const raceResult = await Promise.any(
-      directUrls.map(url =>
-        fetch(url, opts)
-          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-          .then(d => d.elements || [])
-      )
-    );
-    return raceResult;
+    // Desktop fallback (no proxy): race all mirrors directly
+    return await Promise.any(mirrorUrls.map(tryFetch));
     // Note: Promise.any throws AggregateError only if ALL mirrors fail
   }
 
