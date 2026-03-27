@@ -308,6 +308,7 @@ class MeerkatMapCard extends HTMLElement {
     this._mapIniting     = false;  // must reset or re-init is blocked
     this._poiPending      = 0;
     this._lastFetchBounds = null;
+    if (this._fetchAbortCtrl) { this._fetchAbortCtrl.abort(); this._fetchAbortCtrl = null; }
     this._mapCentredOnce = false;
     // Clear shadow DOM so _render() rebuilds the map container on reconnect
     this.shadowRoot.innerHTML = '';
@@ -504,8 +505,9 @@ class MeerkatMapCard extends HTMLElement {
           if (f &&
               b.getSouth() >= f.s && b.getNorth() <= f.n &&
               b.getWest()  >= f.w && b.getEast()  <= f.e) return;
-          // Clear any in-flight guards — old fetches for the previous location
-          // must not block the new area from loading
+          // Cancel in-flight requests for the old location and clear guards
+          if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
+          this._fetchAbortCtrl = new AbortController();
           this._poiFetching = {};
           this._loadAllPOIs();
         }, 1500);
@@ -832,7 +834,10 @@ class MeerkatMapCard extends HTMLElement {
       } catch (_) {}
       if (!fromCache) {
         const fb = this._poiCacheFallback(cat, s, w, n, e);
-        if (fb) this._renderPOILayer(cat, fb);
+        if (fb) {
+          this._renderPOILayer(cat, fb);
+          continue; // nearby cache covers this area — no fetch needed
+        }
       }
       needsFetch.push(cat);
     }
@@ -853,8 +858,12 @@ class MeerkatMapCard extends HTMLElement {
 
     // Batch into groups of 5 — one Overpass request per batch.
     const BATCH = 5;
+    // Create a fresh abort controller for this round of fetches
+    if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
+    this._fetchAbortCtrl = new AbortController();
+    const signal = this._fetchAbortCtrl.signal;
     for (let i = 0; i < needsFetch.length; i += BATCH) {
-      this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e);
+      this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e, signal);
     }
   }
 
@@ -929,7 +938,7 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // ── Batch fetch: one Overpass request for up to 5 categories ─────────
-  async _loadPOIBatch(batch, s, w, n, e) {
+  async _loadPOIBatch(batch, s, w, n, e, signal) {
     // Guard: skip if all cats in this batch are already fetching
     if (!this._poiFetching) this._poiFetching = {};
     const toFetch = batch.filter(c => !this._poiFetching[c.key]);
@@ -975,11 +984,14 @@ class MeerkatMapCard extends HTMLElement {
       this._poiRingEnd(); // one ring decrement per batch request
     };
 
-    this._fetchOverpass(encodedQ).then(finish).catch(fail);
+    this._fetchOverpass(encodedQ, signal).then(finish).catch(err => {
+      if (err && err.name === 'AbortError') return; // silently ignore cancelled requests
+      fail();
+    });
   }
 
   // ── Multi-strategy Overpass fetcher ───────────────────────────────
-  async _fetchOverpass(encodedQ) {
+  async _fetchOverpass(encodedQ, signal) {
     // Strategy A: hass-web-proxy-integration (install via HACS, zero config).
     // Proxies the request through the HA server — same-origin so iOS allows it.
     // See: https://github.com/dermotduffy/hass-web-proxy-integration
@@ -1003,34 +1015,35 @@ class MeerkatMapCard extends HTMLElement {
       }
     }
 
-    if (this._haProxyAvailable) {
-      try {
-        const r = await fetch(haProxyUrl);
-        if (r.ok) {
-          const d = await r.json();
-          return d.elements || [];
-        }
-      } catch (_) {}
-    }
-
-    // Strategy B & C: direct fetch, trying multiple mirrors in sequence
-    const mirrors = [
+    // Build list of URLs to race — proxy first (required for iOS),
+    // then public mirrors in parallel. First valid response wins.
+    const opts = { signal };
+    const directUrls = [
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
     ];
 
-    for (const url of mirrors) {
+    if (this._haProxyAvailable) {
+      // On iOS the proxy is the only route that works — use it alone
       try {
-        const r = await fetch(url);
-        if (r.ok) {
-          const d = await r.json();
-          return d.elements || [];
-        }
-      } catch (_) { continue; }
+        const r = await fetch(haProxyUrl, opts);
+        if (r.ok) return (await r.json()).elements || [];
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+      }
     }
 
-    throw new Error('all Overpass endpoints failed');
+    // Desktop: race all mirrors simultaneously — use whichever responds first
+    const raceResult = await Promise.any(
+      directUrls.map(url =>
+        fetch(url, opts)
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(d => d.elements || [])
+      )
+    );
+    return raceResult;
+    // Note: Promise.any throws AggregateError only if ALL mirrors fail
   }
 
     _renderPOILayer(cat, elements) {
