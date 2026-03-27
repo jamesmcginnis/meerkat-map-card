@@ -189,6 +189,7 @@ class MeerkatMapCard extends HTMLElement {
     this._mapCentredOnce = false;
     this._config      = MeerkatMapCard.getStubConfig();
     this._poiFetching = {};
+    this._poiElements = {}; // in-memory element cache for fast reconnect
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -983,16 +984,29 @@ class MeerkatMapCard extends HTMLElement {
     const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
     const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
     for (const cat of enabled) {
-      // Skip if already rendered
-      if (this._poiLayers[cat.key]) continue;
-      const exact = (() => {
-        try {
-          const raw = localStorage.getItem(this._poiCacheKey(cat, s, w, n, e));
-          if (raw) { const { ts, elements } = JSON.parse(raw); if (Date.now()-ts<172800000) return elements; }
-        } catch(_){}
-        return null;
-      })();
-      const elements = exact || this._poiCacheFallback(cat, s, w, n, e);
+      if (this._poiLayers[cat.key]) continue; // already rendered
+
+      // Priority 1: in-memory elements from the last render — most reliable
+      // on iOS during network switches as it never touches localStorage
+      const mem = this._poiElements && this._poiElements[cat.key];
+      if (mem && mem.length >= 0) { // length 0 is valid (no POIs in this area)
+        this._renderPOILayer(cat, mem);
+        continue;
+      }
+
+      // Priority 2: exact localStorage cache key
+      let elements = null;
+      try {
+        const raw = localStorage.getItem(this._poiCacheKey(cat, s, w, n, e));
+        if (raw) {
+          const { ts, els } = JSON.parse(raw);
+          if (Date.now() - ts < 172800000) elements = els;
+        }
+      } catch (_) {}
+
+      // Priority 3: nearby localStorage cache fallback
+      if (!elements) elements = this._poiCacheFallback(cat, s, w, n, e);
+
       if (elements) this._renderPOILayer(cat, elements);
     }
   }
@@ -1155,6 +1169,11 @@ class MeerkatMapCard extends HTMLElement {
     const newLayer = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
     if (this._poiLayers[cat.key]) this._map.removeLayer(this._poiLayers[cat.key]);
     this._poiLayers[cat.key] = newLayer;
+    // Keep a copy of raw elements in memory so we can re-render on reconnect
+    // without depending on localStorage (which can be unreliable on iOS
+    // during a WiFi→4G network switch).
+    if (!this._poiElements) this._poiElements = {};
+    this._poiElements[cat.key] = elements;
   }
 
   // ── POI popup ─────────────────────────────────────────────────────
@@ -1360,6 +1379,7 @@ class MeerkatMapCard extends HTMLElement {
     // Abort any in-flight requests
     if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
     this._poiFetching = {};
+    this._poiElements = {};  // clear in-memory cache so stale data cannot be restored
     this._lastFetchBounds = null; // bypass bounds check
 
     // Clear localStorage cache for all enabled categories at current bounds
