@@ -496,16 +496,16 @@ class MeerkatMapCard extends HTMLElement {
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
         clearTimeout(this._poiDebounce);
-        // 1500ms debounce — gives the user time to keep dragging before
-        // we start a fetch, reducing wasted requests mid-pan
+        // 1500ms debounce: gives the user time to keep dragging before
+        // a fetch starts, avoiding wasted requests mid-pan
         this._poiDebounce = setTimeout(() => {
           const b = this._map.getBounds();
           const f = this._lastFetchBounds;
-          // Skip if new view is fully inside the last fetched area (zoom in / tiny pan)
+          // Skip if new view fits inside the last fetched area
           if (f &&
               b.getSouth() >= f.s && b.getNorth() <= f.n &&
               b.getWest()  >= f.w && b.getEast()  <= f.e) return;
-          // Cancel in-flight requests for the old location and clear guards
+          // Cancel any in-flight requests for the old location
           if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
           this._fetchAbortCtrl = new AbortController();
           this._poiFetching = {};
@@ -788,9 +788,7 @@ class MeerkatMapCard extends HTMLElement {
   // ── POI loading ───────────────────────────────────────────────────
   async _loadAllPOIs(ps, pw, pn, pe) {
     if (!this._mapInitialised || !this._map) return;
-    // Accept pre-computed bounds (from _prefetchPOIs) or compute from map.
-    // When computing from map, add a 15% buffer so short pans after this
-    // fetch don't immediately trigger another load.
+    // Accept pre-computed bounds (from _prefetchPOIs) or compute with 15% buffer
     const bounds = this._map.getBounds();
     let s, w, n, e;
     if (ps !== undefined) {
@@ -856,12 +854,14 @@ class MeerkatMapCard extends HTMLElement {
       return ap - bp;
     });
 
+    // Create/replace abort controller for this round of fetches
+    if (!this._fetchAbortCtrl || this._fetchAbortCtrl.signal.aborted) {
+      this._fetchAbortCtrl = new AbortController();
+    }
+    const signal = this._fetchAbortCtrl.signal;
+
     // Batch into groups of 5 — one Overpass request per batch.
     const BATCH = 5;
-    // Create a fresh abort controller for this round of fetches
-    if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
-    this._fetchAbortCtrl = new AbortController();
-    const signal = this._fetchAbortCtrl.signal;
     for (let i = 0; i < needsFetch.length; i += BATCH) {
       this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e, signal);
     }
@@ -875,12 +875,8 @@ class MeerkatMapCard extends HTMLElement {
     const vs  = b.getSouth(), vw = b.getWest(), vn = b.getNorth(), ve = b.getEast();
 
     // Check whether all enabled categories are covered by any valid cache entry
-    // (exact key OR a nearby entry whose bounds contain the viewport centre).
-    // This handles the case where data was cached with padded bounds — the
-    // exact viewport key won't exist but the padded one will.
     const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
     const allCached = enabled.length > 0 && enabled.every(cat => {
-      // 1. Exact key match
       try {
         const key = this._poiCacheKey(cat, vs, vw, vn, ve);
         const raw = localStorage.getItem(key);
@@ -889,18 +885,16 @@ class MeerkatMapCard extends HTMLElement {
           if (Date.now() - ts < 172800000) return true;
         }
       } catch (_) {}
-      // 2. Nearby cache entry that covers this viewport
       return this._poiCacheFallback(cat, vs, vw, vn, ve) !== null;
     });
 
     if (allCached) {
-      // Everything is covered by cache — render instantly, no ring, no network
+      // All covered by cache — render instantly, no ring, no network
       this._loadAllPOIs(vs, vw, vn, ve);
       return;
     }
 
-    // First load or stale cache — fetch with 25% expanded bounds so short
-    // pans after this are also covered by the cache
+    // Fetch with 25% expanded bounds so short pans are pre-cached
     const latPad = (vn - vs) * 0.25;
     const lngPad = (ve - vw) * 0.25;
     const s = vs - latPad, n = vn + latPad;
@@ -985,7 +979,7 @@ class MeerkatMapCard extends HTMLElement {
     };
 
     this._fetchOverpass(encodedQ, signal).then(finish).catch(err => {
-      if (err && err.name === 'AbortError') return; // silently ignore cancelled requests
+      if (err && err.name === 'AbortError') return; // silently ignore cancelled
       fail();
     });
   }
@@ -1015,25 +1009,19 @@ class MeerkatMapCard extends HTMLElement {
       }
     }
 
-    // Build list of URLs to race — proxy first (required for iOS),
-    // then public mirrors in parallel. First valid response wins.
     const opts = { signal };
     const mirrorUrls = [
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
     ];
-
-    // Helper: fetch one URL and return parsed elements, or throw
-    const tryFetch = (url) =>
+    const tryFetch = url =>
       fetch(url, opts)
         .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
         .then(d => d.elements || []);
 
     if (this._haProxyAvailable) {
-      // iOS (and desktop with proxy installed): race all mirrors through the
-      // HA proxy simultaneously. Each is still same-origin so iOS allows them.
-      // Whichever Overpass server responds first wins.
+      // iOS: race all mirrors through the HA proxy simultaneously
       const proxyUrls = mirrorUrls.map(
         u => `/api/hass_web_proxy/v0/?url=${encodeURIComponent(u)}`
       );
@@ -1041,13 +1029,11 @@ class MeerkatMapCard extends HTMLElement {
         return await Promise.any(proxyUrls.map(tryFetch));
       } catch (e) {
         if (e.name === 'AbortError') throw e;
-        // All proxy attempts failed — fall through to direct fetch on desktop
       }
     }
 
-    // Desktop fallback (no proxy): race all mirrors directly
+    // Desktop: race all mirrors directly
     return await Promise.any(mirrorUrls.map(tryFetch));
-    // Note: Promise.any throws AggregateError only if ALL mirrors fail
   }
 
     _renderPOILayer(cat, elements) {
