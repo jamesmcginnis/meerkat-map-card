@@ -830,15 +830,16 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     // Step 3: fetch Overpass data
-    // On iOS WKWebView, direct requests to overpass-api.de are blocked by CSP.
-    // We route via HA using a rest_command (see README for setup instructions).
+    // Strategy (tried in order):
+    //   A) hass-web-proxy-integration HACS proxy — zero config, works on iOS
+    //   B) Direct fetch to primary Overpass endpoint
+    //   C) Direct fetch to fallback Overpass mirrors
     if (!this._poiFetching) this._poiFetching = {};
     this._poiFetching[cat.key] = true;
     this._poiRingStart(cat);
 
-    const query      = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
-    const encodedQ   = encodeURIComponent(query);
-    const directUrl  = `https://overpass-api.de/api/interpreter?data=${encodedQ}`;
+    const query    = `[out:json][timeout:25];(${cat.overpass}(${s},${w},${n},${e}););out center tags;`;
+    const encodedQ = encodeURIComponent(query);
 
     const onSuccess = (elements) => {
       try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements })); } catch (_) {}
@@ -855,40 +856,56 @@ class MeerkatMapCard extends HTMLElement {
       this._poiRingEnd(cat);
     };
 
-    // Try via HA proxy first (works on iOS); fall back to direct fetch (works on desktop)
-    this._overpassViaHA(directUrl)
-      .then(onSuccess)
-      .catch(() => {
-        // HA proxy not configured or failed — try direct
-        fetch(directUrl)
-          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-          .then(d => onSuccess(d.elements || []))
-          .catch(onFail);
-      });
+    this._fetchOverpass(encodedQ).then(onSuccess).catch(onFail);
   }
 
-  // ── HA-proxied Overpass fetch (bypasses iOS CSP) ───────────────────
-  // Requires this in configuration.yaml:
-  //   rest_command:
-  //     overpass_query:
-  //       url: "{{ url }}"
-  //       method: GET
-  //
-  // Returns a promise resolving to elements[], or rejects if unavailable.
-  async _overpassViaHA(url) {
-    if (!this._hass) throw new Error('no hass');
-    // Use hass.callApi to POST to /api/services/rest_command/overpass_query
-    // This runs server-side, bypassing the browser CSP entirely.
-    const resp = await this._hass.callApi(
-      'POST',
-      'services/rest_command/overpass_query',
-      { url }
-    );
-    // rest_command returns the response body as a string in resp[0].attributes.response
-    const body = resp && resp[0] && resp[0].attributes && resp[0].attributes.response;
-    if (!body) throw new Error('no response');
-    const data = JSON.parse(body);
-    return data.elements || [];
+  // ── Multi-strategy Overpass fetcher ───────────────────────────────
+  async _fetchOverpass(encodedQ) {
+    // Strategy A: hass-web-proxy-integration (install via HACS, zero config).
+    // Proxies the request through the HA server — same-origin so iOS allows it.
+    // See: https://github.com/dermotduffy/hass-web-proxy-integration
+    const primaryUrl = `https://overpass-api.de/api/interpreter?data=${encodedQ}`;
+    const haProxyUrl = `/api/hass_web_proxy/v0/?url=${encodeURIComponent(primaryUrl)}`;
+
+    // Check once if the proxy is available and cache the result
+    if (this._haProxyAvailable === undefined) {
+      try {
+        const probe = await fetch('/api/hass_web_proxy/v0/', { method: 'HEAD' });
+        // 404 = HA is up but proxy not installed; 405/200/302 = proxy is present
+        this._haProxyAvailable = probe.status !== 404;
+      } catch (_) {
+        this._haProxyAvailable = false;
+      }
+    }
+
+    if (this._haProxyAvailable) {
+      try {
+        const r = await fetch(haProxyUrl);
+        if (r.ok) {
+          const d = await r.json();
+          return d.elements || [];
+        }
+      } catch (_) {}
+    }
+
+    // Strategy B & C: direct fetch, trying multiple mirrors in sequence
+    const mirrors = [
+      `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
+      `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
+      `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
+    ];
+
+    for (const url of mirrors) {
+      try {
+        const r = await fetch(url);
+        if (r.ok) {
+          const d = await r.json();
+          return d.elements || [];
+        }
+      } catch (_) { continue; }
+    }
+
+    throw new Error('all Overpass endpoints failed');
   }
 
     _renderPOILayer(cat, elements) {
