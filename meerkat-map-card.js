@@ -1322,7 +1322,7 @@ class MeerkatMapCard extends HTMLElement {
       arc.setAttribute('stroke', '#34C759');
       arc.style.strokeDasharray = `${circ} 0`;
       btn.style.background = 'rgba(30,30,34,0.75)';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41-1.41L9,16.17z" fill="#34C759"/></svg>';
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="#34C759"/></svg>';
       btn.title = 'Refresh POI data';
       btn.onclick = () => { this._forceRefreshPOIs(); };
       clearTimeout(this._ringFadeTimer);
@@ -1335,7 +1335,7 @@ class MeerkatMapCard extends HTMLElement {
       arc.setAttribute('stroke', '#FF3B30');
       arc.style.strokeDasharray = `${circ * 0.3} ${circ * 0.7}`;
       btn.style.background = 'rgba(30,30,34,0.75)';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65,6.35A7.958,7.958,0,0,0,12,4C7.58,4,4,7.58,4,12s3.58,8,8,8,8-3.58,8-8H20A10,10,0,1,1,12,2a9.955,9.955,0,0,1,7.07,2.93L21,3V8H16L17.65,6.35Z" fill="#FF3B30"/></svg>';
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="#FF3B30"/></svg>';
       btn.title = 'Retry loading POI data';
       btn.onclick = () => { this._forceRefreshPOIs(); };
 
@@ -1343,7 +1343,7 @@ class MeerkatMapCard extends HTMLElement {
       arc.setAttribute('stroke', 'rgba(255,255,255,0.35)');
       arc.style.strokeDasharray = `${circ} 0`;
       btn.style.background = 'rgba(30,30,34,0.75)';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65,6.35A7.958,7.958,0,0,0,12,4C7.58,4,4,7.58,4,12s3.58,8,8,8,8-3.58,8-8H20A10,10,0,1,1,12,2a9.955,9.955,0,0,1,7.07,2.93L21,3V8H16L17.65,6.35Z" fill="rgba(255,255,255,0.55)"/></svg>';
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="rgba(255,255,255,0.65)"/></svg>';
       btn.title = 'Refresh POI data';
       btn.onclick = () => { this._forceRefreshPOIs(); };
     }
@@ -1357,8 +1357,38 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   _forceRefreshPOIs() {
-    this._lastFetchBounds = null; // force refetch ignoring bounds cache
+    // Abort any in-flight requests
+    if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
     this._poiFetching = {};
+    this._lastFetchBounds = null; // bypass bounds check
+
+    // Clear localStorage cache for all enabled categories at current bounds
+    // so fresh data is fetched rather than served from cache
+    if (this._mapInitialised && this._map) {
+      const b = this._map.getBounds();
+      const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
+      try {
+        const prefix = 'mmPOI:';
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith(prefix)) keys.push(k);
+        }
+        const midLat = (s + n) / 2, midLng = (w + e) / 2;
+        keys.forEach(k => {
+          const parts = k.split(':');
+          if (parts.length < 3) return;
+          const coords = parts[2].split(',').map(Number);
+          if (coords.length === 4) {
+            const [cs, cw, cn, ce] = coords;
+            if (midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce) {
+              localStorage.removeItem(k);
+            }
+          }
+        });
+      } catch (_) {}
+    }
+
     this._loadAllPOIs();
   }
 
