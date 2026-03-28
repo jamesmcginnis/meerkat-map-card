@@ -190,6 +190,7 @@ class MeerkatMapCard extends HTMLElement {
     this._config      = MeerkatMapCard.getStubConfig();
     this._poiFetching = {};
     this._poiElements = {}; // in-memory element cache for fast reconnect
+    this._poiElementsBounds = null; // bounds at the time _poiElements was captured
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -576,9 +577,17 @@ class MeerkatMapCard extends HTMLElement {
         this._restorePOIsFromCache();
         // Only prefetch if we have no in-memory data (first load or forced refresh)
         // — avoids any network activity on navigate-away/return
-        const hasMemory = this._poiElements && Object.keys(this._poiElements).length > 0;
-        if (!hasMemory) setTimeout(() => this._prefetchPOIs(), 600);
-        else this._prefetchPOIs(); // still runs but allCached check will skip network
+        // Only treat in-memory data as "present" if it was captured at this location
+        const eb = this._poiElementsBounds;
+        const mapB = this._map.getBounds();
+        const midLat = (mapB.getSouth() + mapB.getNorth()) / 2;
+        const midLng = (mapB.getWest()  + mapB.getEast())  / 2;
+        const memValid = eb && this._poiElements &&
+          Object.keys(this._poiElements).length > 0 &&
+          midLat >= eb.s && midLat <= eb.n &&
+          midLng >= eb.w && midLng <= eb.e;
+        if (!memValid) setTimeout(() => this._prefetchPOIs(), 600);
+        else this._prefetchPOIs(); // allCached check will skip network
       });
 
     } catch (e) {
@@ -890,15 +899,9 @@ class MeerkatMapCard extends HTMLElement {
     // Step 1: render any cached data instantly for all enabled categories
     const needsFetch = [];
     for (const cat of enabled) {
-      // Priority 1: in-memory elements — survives network switches reliably.
-      // If the category key exists in _poiElements (even as empty array)
-      // it means we rendered this category in the current session — reuse it.
-      if (this._poiElements && Object.prototype.hasOwnProperty.call(this._poiElements, cat.key)) {
-        this._renderPOILayer(cat, this._poiElements[cat.key]);
-        continue; // in-memory hit — no fetch needed
-      }
-
-      // Priority 2: localStorage exact key
+      // Cache check — localStorage exact key first, then nearby fallback.
+      // _poiElements is NOT used here because it is not location-aware;
+      // it is only used by _restorePOIsFromCache during reconnect.
       const cacheKey = this._poiCacheKey(cat, s, w, n, e);
       let fromCache = false;
       try {
@@ -912,8 +915,6 @@ class MeerkatMapCard extends HTMLElement {
           }
         }
       } catch (_) {}
-
-      // Priority 3: nearby localStorage fallback
       if (!fromCache) {
         const fb = this._poiCacheFallback(cat, s, w, n, e);
         if (fb) {
@@ -1006,32 +1007,41 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._mapInitialised || !this._map) return;
     const b = this._map.getBounds();
     const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
+    const midLat = (s + n) / 2, midLng = (w + e) / 2;
     const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+
+    // Check if _poiElements was captured at a location that covers the current
+    // map centre. Only use it if it does — avoids serving the wrong town's data.
+    const eb = this._poiElementsBounds;
+    const memMatchesLocation = eb &&
+      midLat >= eb.s && midLat <= eb.n &&
+      midLng >= eb.w && midLng <= eb.e;
+
     for (const cat of enabled) {
       if (this._poiLayers[cat.key]) continue; // already rendered
 
-      // Priority 1: in-memory elements from the last render — most reliable
-      // on iOS during network switches as it never touches localStorage
-      const mem = this._poiElements && this._poiElements[cat.key];
-      if (mem && mem.length >= 0) { // length 0 is valid (no POIs in this area)
-        this._renderPOILayer(cat, mem);
+      // Priority 1: in-memory elements — only if they are for this location
+      if (memMatchesLocation &&
+          this._poiElements &&
+          Object.prototype.hasOwnProperty.call(this._poiElements, cat.key)) {
+        this._renderPOILayer(cat, this._poiElements[cat.key]);
         continue;
       }
 
-      // Priority 2: exact localStorage cache key
+      // Priority 2: localStorage exact key
       let elements = null;
       try {
         const raw = localStorage.getItem(this._poiCacheKey(cat, s, w, n, e));
         if (raw) {
-          const { ts, els } = JSON.parse(raw);
+          const { ts, elements: els } = JSON.parse(raw);
           if (Date.now() - ts < this._cacheTTL) elements = els;
         }
       } catch (_) {}
 
-      // Priority 3: nearby localStorage cache fallback
-      if (!elements) elements = this._poiCacheFallback(cat, s, w, n, e);
+      // Priority 3: nearby localStorage fallback
+      if (elements === null) elements = this._poiCacheFallback(cat, s, w, n, e);
 
-      if (elements) this._renderPOILayer(cat, elements);
+      if (elements !== null) this._renderPOILayer(cat, elements);
     }
   }
 
@@ -1198,6 +1208,9 @@ class MeerkatMapCard extends HTMLElement {
     // during a WiFi→4G network switch).
     if (!this._poiElements) this._poiElements = {};
     this._poiElements[cat.key] = elements;
+    // Store the bounds this data was fetched for so restore can
+    // validate it belongs to the current location before using it
+    if (this._lastFetchBounds) this._poiElementsBounds = this._lastFetchBounds;
   }
 
   // ── POI popup ─────────────────────────────────────────────────────
@@ -1451,6 +1464,7 @@ class MeerkatMapCard extends HTMLElement {
     if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
     this._poiFetching = {};
     this._poiElements = {};  // clear in-memory cache so stale data cannot be restored
+    this._poiElementsBounds = null;
     this._lastFetchBounds = null; // bypass bounds check
 
     // Clear localStorage cache for all enabled categories at current bounds
