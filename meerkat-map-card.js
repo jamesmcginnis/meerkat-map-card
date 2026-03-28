@@ -890,19 +890,30 @@ class MeerkatMapCard extends HTMLElement {
     // Step 1: render any cached data instantly for all enabled categories
     const needsFetch = [];
     for (const cat of enabled) {
+      // Priority 1: in-memory elements — survives network switches reliably.
+      // If the category key exists in _poiElements (even as empty array)
+      // it means we rendered this category in the current session — reuse it.
+      if (this._poiElements && Object.prototype.hasOwnProperty.call(this._poiElements, cat.key)) {
+        this._renderPOILayer(cat, this._poiElements[cat.key]);
+        continue; // in-memory hit — no fetch needed
+      }
+
+      // Priority 2: localStorage exact key
       const cacheKey = this._poiCacheKey(cat, s, w, n, e);
       let fromCache = false;
       try {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
           const { ts, elements } = JSON.parse(cached);
-          if (Date.now() - ts < this._cacheTTL) {  // configurable TTL
+          if (Date.now() - ts < this._cacheTTL) {
             this._renderPOILayer(cat, elements);
             fromCache = true;
             continue; // valid cache — no network request needed
           }
         }
       } catch (_) {}
+
+      // Priority 3: nearby localStorage fallback
       if (!fromCache) {
         const fb = this._poiCacheFallback(cat, s, w, n, e);
         if (fb) {
