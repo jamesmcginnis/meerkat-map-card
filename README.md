@@ -6,7 +6,7 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=meerkat-map-card&category=plugin)
 
----
+-----
 
 ## Features
 
@@ -19,10 +19,11 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 - **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
 - **Dark / Light / Auto theme**
+- **POI quick-select** — tap the map pin button on the map to toggle points of interest directly without opening the editor
 - **Full visual editor** — no YAML required
 - **iOS compatible** — works in the HA companion app on iPhone and iPad with the proxy integration (see below)
 
----
+-----
 
 ## Installation
 
@@ -31,20 +32,20 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 Click the button above, or:
 
 1. In HACS → Frontend, click the three-dot menu → **Custom repositories**
-2. Add `https://github.com/jamesmcginnis/meerkat-map-card` with category **Frontend**
-3. Install **Meerkat Map Card**
-4. Refresh your browser
+1. Add `https://github.com/jamesmcginnis/meerkat-map-card` with category **Frontend**
+1. Install **Meerkat Map Card**
+1. Refresh your browser
 
 ### Manual
 
 1. Download `meerkat-map-card.js` from this repository
-2. Copy it to `/config/www/meerkat-map-card.js`
-3. In Home Assistant → Settings → Dashboards → Resources, add:
-   - URL: `/local/meerkat-map-card.js`
-   - Type: JavaScript module
-4. Refresh your browser
+1. Copy it to `/config/www/meerkat-map-card.js`
+1. In Home Assistant → Settings → Dashboards → Resources, add:
+- URL: `/local/meerkat-map-card.js`
+- Type: JavaScript module
+1. Refresh your browser
 
----
+-----
 
 ## iOS Setup — Points of Interest
 
@@ -55,25 +56,25 @@ To fix this, install the **Home Assistant Web Proxy** integration. It routes Ove
 ### Step 1 — Install the proxy integration via HACS
 
 1. In HACS → **Integrations** (not Frontend), click the three-dot menu → **Custom repositories**
-2. Add `https://github.com/dermotduffy/hass-web-proxy-integration` with category **Integration**
-3. Install **Home Assistant Web Proxy**
-4. Restart Home Assistant
+1. Add `https://github.com/dermotduffy/hass-web-proxy-integration` with category **Integration**
+1. Install **Home Assistant Web Proxy**
+1. Restart Home Assistant
 
 ### Step 2 — Add the Overpass URL patterns
 
 The card races three Overpass mirrors simultaneously and uses whichever responds first. Add all three for the fastest possible load times:
 
 1. Settings → Devices & Services → find **Home Assistant Web Proxy** → **Configure**
-2. Click **+ ADD** and enter `https://overpass-api.de/*`
-3. Click **+ ADD** again and enter `https://overpass.kumi.systems/*`
-4. Click **+ ADD** again and enter `https://maps.mail.ru/*`
-5. Click **Save**
+1. Click **+ ADD** and enter `https://overpass-api.de/*`
+1. Click **+ ADD** again and enter `https://overpass.kumi.systems/*`
+1. Click **+ ADD** again and enter `https://maps.mail.ru/*`
+1. Click **Save**
 
 No restart needed after step 2. The card automatically uses the proxy on iOS and falls back to direct connections on desktop.
 
 > **Why three mirrors?** Each is an independent Overpass server in a different location. Racing them simultaneously means the card always uses whichever is fastest at that moment.
 
----
+-----
 
 ## Configuration
 
@@ -97,19 +98,19 @@ show_supermarkets: true
 
 ### Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `person_entity` | string | — | Entity ID of the person or device tracker to display |
-| `geocoded_entity` | string | — | Optional. HA companion app geocoded location sensor for full address inc. house number |
-| `theme` | string | `dark` | Map colour scheme: `dark`, `light`, or `auto` |
-| `map_height` | number | `420` | Height of the map in pixels |
-| `zoom_level` | number | `15` | Default zoom level (1–20) |
-| `distance_unit` | string | `metric` | Distance units: `metric` (km/m), `mixed` (mi/m), or `imperial` (mi/yd) |
-| `cache_ttl_hours` | number | `48` | How long POI data is cached before a refresh is needed (hours) |
+|Option           |Type  |Default |Description                                                                           |
+|-----------------|------|--------|--------------------------------------------------------------------------------------|
+|`person_entity`  |string|—       |Entity ID of the person or device tracker to display                                  |
+|`geocoded_entity`|string|—       |Optional. HA companion app geocoded location sensor for full address inc. house number|
+|`theme`          |string|`dark`  |Map colour scheme: `dark`, `light`, or `auto`                                         |
+|`map_height`     |number|`420`   |Height of the map in pixels                                                           |
+|`zoom_level`     |number|`15`    |Default zoom level (1–20)                                                             |
+|`distance_unit`  |string|`metric`|Distance units: `metric` (km/m), `mixed` (mi/m), or `imperial` (mi/yd)                |
+|`cache_ttl_hours`|number|`48`    |How long POI data is cached before a refresh is needed (hours)                        |
 
 For a full list of the 53 POI `show_*` keys, see the visual editor.
 
----
+-----
 
 ## Points of Interest
 
@@ -141,22 +142,22 @@ The 53 categories are organised into 7 groups in the visual editor:
 
 **Enabled by default:** Train Stations, Bus Stops, Hospitals, Pharmacies, Supermarkets.
 
----
+-----
 
 ## POI Status Ring
 
 A small ring in the bottom-left corner of the map shows the current state of POI data loading:
 
-| State | Colour | Meaning |
-|-------|--------|---------|
-| **Idle** | White | Data loaded and up to date |
-| **Loading** | Yellow, breathing | Fetching data from Overpass |
-| **Success** | Green, pulsing | Data loaded successfully |
-| **Error** | Red, fades to white | Fetch failed — tap the centre button to retry |
+|State      |Colour             |Meaning                                      |
+|-----------|-------------------|---------------------------------------------|
+|**Idle**   |White              |Data loaded and up to date                   |
+|**Loading**|Yellow, breathing  |Fetching data from Overpass                  |
+|**Success**|Green, pulsing     |Data loaded successfully                     |
+|**Error**  |Red, fades to white|Fetch failed — tap the centre button to retry|
 
 The centre button changes depending on state — a stop icon while loading, a refresh icon otherwise. Tapping the refresh button shows a confirmation prompt before clearing the cache and reloading.
 
----
+-----
 
 ## Cache Settings
 
@@ -166,13 +167,13 @@ The visual editor includes a **Cache Settings** section with two options:
 
 **Clear All Cached POI Data** — removes all saved POI data from the device immediately. Useful if you notice outdated information on the map.
 
----
+-----
 
 ## Person Popup
 
 Tap the person marker to see zone name, last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address.
 
----
+-----
 
 ## Geocoded Location Sensor
 
@@ -180,17 +181,17 @@ The `geocoded_entity` option is the most reliable way to display a full address 
 
 Without this option the card falls back to [Nominatim](https://nominatim.openstreetmap.org/) reverse geocoding, which may omit the house number for some residential addresses.
 
----
+-----
 
 ## Privacy
 
 - Map tiles are loaded from [CARTO](https://carto.com/) (OpenStreetMap data)
 - POI data is fetched from the [Overpass API](https://overpass-api.de/) and two public mirrors — only the visible map bounding box is sent, no personal data
 - Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
-- POI results are cached in your browser's `localStorage` only — nothing is sent to any third party beyond the API calls above
+- POI results are cached in your browser’s `localStorage` only — nothing is sent to any third party beyond the API calls above
 - No analytics, no accounts, no tracking
 
----
+-----
 
 ## Requirements
 
@@ -198,8 +199,8 @@ Without this option the card falls back to [Nominatim](https://nominatim.openstr
 - A `person` entity or device tracker with `latitude` and `longitude` attributes
 - For POI loading on iPhone and iPad: [Home Assistant Web Proxy](https://github.com/dermotduffy/hass-web-proxy-integration) (free HACS integration)
 
----
+-----
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md)
+MIT — see <LICENSE.md>
