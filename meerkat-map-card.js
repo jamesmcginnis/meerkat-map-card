@@ -591,8 +591,12 @@ class MeerkatMapCard extends HTMLElement {
           Object.keys(this._poiElements).length > 0 &&
           midLat >= eb.s && midLat <= eb.n &&
           midLng >= eb.w && midLng <= eb.e;
-        if (!memValid) setTimeout(() => this._prefetchPOIs(), 600);
-        else this._prefetchPOIs(); // allCached check will skip network
+        if (!memValid) {
+          // No valid in-memory data — do a full prefetch (may need network)
+          setTimeout(() => this._prefetchPOIs(), 600);
+        }
+        // If memValid: _restorePOIsFromCache already rendered everything from
+        // memory above — no prefetch needed, no ring, no network request
       });
 
     } catch (e) {
