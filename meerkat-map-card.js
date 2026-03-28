@@ -441,6 +441,9 @@ class MeerkatMapCard extends HTMLElement {
             <button class="mm-ctrl-btn" id="mm-zoom-out-btn" title="Zoom out">
               <svg viewBox="0 0 24 24"><path d="M19,13H5V11H19V13Z" fill="currentColor"/></svg>
             </button>
+            <button class="mm-ctrl-btn" id="mm-poi-btn" title="Points of interest">
+              <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/></svg>
+            </button>
           </div>
           <div id="mm-loading">
             <div class="mm-spinner"></div>
@@ -472,6 +475,8 @@ class MeerkatMapCard extends HTMLElement {
     homeBtn.addEventListener('click',    () => this._centreOnPerson());
     zoomInBtn.addEventListener('click',  () => this._map?.zoomIn());
     zoomOutBtn.addEventListener('click', () => this._map?.zoomOut());
+    const poiBtn = this.shadowRoot.getElementById('mm-poi-btn');
+    if (poiBtn) poiBtn.addEventListener('click', () => this._openPOISheet());
   }
 
   // ── Theme helpers ─────────────────────────────────────────────────
@@ -688,6 +693,125 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // ── Centre on person ──────────────────────────────────────────────
+  _openPOISheet() {
+    const isDark = this._isDark();
+    const bg     = isDark ? 'rgba(22,22,26,0.97)' : 'rgba(250,250,254,0.98)';
+    const tx     = isDark ? '#ffffff' : '#000000';
+    const sub    = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)';
+    const bd     = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    const trkOn  = '#007AFF';
+    const trkOff = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
+    const cfg    = this._config || {};
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = [
+      'position:fixed;inset:0;z-index:99999',
+      'display:flex;align-items:flex-end;justify-content:center',
+      'background:rgba(0,0,0,0.45)',
+      'backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)',
+      'animation:mmFadeIn 0.2s ease',
+    ].join(';');
+
+    // Build toggle rows for all groups
+    const groupsHTML = MM_POI_GROUPS.map(group => `
+      <div style="margin-bottom:6px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+          letter-spacing:.07em;color:${sub};padding:10px 20px 6px;">${group.label}</div>
+        <div style="background:${isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.03)'};
+          border-radius:14px;margin:0 12px;overflow:hidden;">
+          ${group.pois.map((cat, i) => `
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;
+              ${i > 0 ? 'border-top:1px solid ' + bd + ';' : ''}">
+              <span style="font-size:18px;width:24px;text-align:center;">${cat.emoji}</span>
+              <span style="flex:1;font-size:15px;font-weight:500;color:${tx};">${cat.label}</span>
+              <label style="position:relative;width:44px;height:26px;flex-shrink:0;">
+                <input type="checkbox" data-key="${cat.key}"
+                  ${cfg[cat.key] ? 'checked' : ''}
+                  style="opacity:0;width:0;height:0;position:absolute;">
+                <span class="mm-sheet-track" data-key="${cat.key}"
+                  style="position:absolute;inset:0;border-radius:13px;cursor:pointer;
+                  background:${cfg[cat.key] ? trkOn : trkOff};
+                  transition:background 0.2s ease;">
+                  <span style="position:absolute;top:3px;
+                    left:${cfg[cat.key] ? '21px' : '3px'};
+                    width:20px;height:20px;border-radius:50%;background:#fff;
+                    box-shadow:0 1px 4px rgba(0,0,0,0.3);
+                    transition:left 0.2s ease;"></span>
+                </span>
+              </label>
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
+
+    overlay.innerHTML = `
+      <style>
+        @keyframes mmFadeIn  { from { opacity:0 } to { opacity:1 } }
+        @keyframes mmSlideUp { from { transform:translateY(100%) } to { transform:translateY(0) } }
+      </style>
+      <div style="
+        background:${bg};
+        backdrop-filter:blur(40px) saturate(180%);
+        -webkit-backdrop-filter:blur(40px) saturate(180%);
+        border:1px solid ${bd};
+        border-radius:24px 24px 0 0;
+        width:100%;max-width:520px;
+        max-height:82vh;
+        display:flex;flex-direction:column;
+        animation:mmSlideUp 0.32s cubic-bezier(0.32,0.72,0,1);
+        font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;
+      ">
+        <!-- Handle -->
+        <div style="display:flex;justify-content:center;padding:10px 0 4px;">
+          <div style="width:36px;height:5px;border-radius:3px;background:${isDark?'rgba(255,255,255,0.25)':'rgba(0,0,0,0.18)'};"></div>
+        </div>
+        <!-- Header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px 12px;">
+          <div style="font-size:18px;font-weight:700;color:${tx};letter-spacing:-0.3px;">Points of Interest</div>
+          <button id="mm-sheet-close" style="width:30px;height:30px;border-radius:50%;border:none;
+            background:${isDark?'rgba(255,255,255,0.12)':'rgba(0,0,0,0.08)'};
+            color:${tx};font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/></svg>
+          </button>
+        </div>
+        <!-- Scrollable list -->
+        <div style="overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:24px;">
+          ${groupsHTML}
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.querySelector('#mm-sheet-close').addEventListener('click', close);
+
+    // Toggle handlers — update config and re-render ring visuals in real time
+    overlay.querySelectorAll('input[data-key]').forEach(input => {
+      input.addEventListener('change', () => {
+        const key   = input.dataset.key;
+        const val   = input.checked;
+        // Update track colour and thumb position
+        const track = overlay.querySelector('.mm-sheet-track[data-key="' + key + '"]');
+        if (track) {
+          track.style.background = val ? trkOn : trkOff;
+          track.querySelector('span').style.left = val ? '21px' : '3px';
+        }
+        // Persist to card config via HA config-changed event
+        this._config = { ...this._config, [key]: val };
+        this.dispatchEvent(new CustomEvent('config-changed', {
+          detail: { config: this._config }, bubbles: true, composed: true
+        }));
+        // Trigger POI layer update immediately
+        if (val) {
+          if (this._poiFetching) this._poiFetching[key] = false;
+          this._loadAllPOIs();
+        } else {
+          this._loadAllPOIs(); // removes disabled layer
+        }
+      });
+    });
+  }
+
   _centreOnPerson() {
     if (!this._hass || !this._config?.person_entity || !this._map) return;
     const state = this._hass.states[this._config.person_entity];
