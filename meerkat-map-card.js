@@ -202,6 +202,7 @@ class MeerkatMapCard extends HTMLElement {
       map_height:          420,
       zoom_level:          15,
       distance_unit:       'metric',
+      cache_ttl_hours:     48,    // how long POI cache is valid (hours)
       // Food & Drink
       show_restaurants:    false,
       show_cafes:          false,
@@ -408,13 +409,22 @@ class MeerkatMapCard extends HTMLElement {
         }
         #mm-ring-btn:active { transform: translate(-50%,-50%) scale(0.88); }
         #mm-ring-btn svg { width: 14px; height: 14px; display: block; flex-shrink: 0; }
-        @keyframes mmRingPulse {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.35; }
+        @keyframes mmRingBreathe {
+          0%, 100% { opacity: 0.9; stroke-width: 3; }
+          50%       { opacity: 0.45; stroke-width: 2.2; }
         }
-        #mm-poi-ring.mm-ring-loading #mm-ring-arc { animation: mmRingPulse 1.2s ease-in-out infinite; }
-        #mm-poi-ring.mm-ring-success #mm-ring-arc { animation: mmRingPulse 0.6s ease-in-out 3; }
-        #mm-poi-ring.mm-ring-error   #mm-ring-arc { animation: mmRingPulse 0.5s ease-in-out infinite; }
+        @keyframes mmRingSuccess {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.5; }
+        }
+        @keyframes mmRingFadeToIdle {
+          0%   { stroke: #FF3B30; opacity: 1; }
+          60%  { stroke: #FF3B30; opacity: 0.7; }
+          100% { stroke: rgba(255,255,255,0.35); opacity: 1; }
+        }
+        #mm-poi-ring.mm-ring-loading #mm-ring-arc { animation: mmRingBreathe 1.6s ease-in-out infinite; }
+        #mm-poi-ring.mm-ring-success #mm-ring-arc { animation: mmRingSuccess 0.5s ease-in-out 3; }
+        #mm-poi-ring.mm-ring-error-fade #mm-ring-arc { animation: mmRingFadeToIdle 3s ease-in-out forwards; }
         .leaflet-attribution-container a { color: ${accent}; }
       </style>
       <ha-card>
@@ -536,8 +546,8 @@ class MeerkatMapCard extends HTMLElement {
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
         clearTimeout(this._poiDebounce);
-        // 1500ms debounce: gives the user time to keep dragging before
-        // a fetch starts, avoiding wasted requests mid-pan
+        // 2500ms debounce: generous pause so the user can keep scrolling
+        // without triggering a fetch on every momentary stop
         this._poiDebounce = setTimeout(() => {
           const b = this._map.getBounds();
           const f = this._lastFetchBounds;
@@ -550,7 +560,7 @@ class MeerkatMapCard extends HTMLElement {
           this._fetchAbortCtrl = new AbortController();
           this._poiFetching = {};
           this._loadAllPOIs();
-        }, 1500);
+        }, 2500);
       });
 
       // Hide loading overlay
@@ -562,10 +572,13 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
-        // Re-render POI layers from cache immediately so they appear
-        // before any network fetch completes (fixes WiFi→4G disappearance)
+        // Re-render POI layers from in-memory cache immediately
         this._restorePOIsFromCache();
-        setTimeout(() => this._prefetchPOIs(), 600);
+        // Only prefetch if we have no in-memory data (first load or forced refresh)
+        // — avoids any network activity on navigate-away/return
+        const hasMemory = this._poiElements && Object.keys(this._poiElements).length > 0;
+        if (!hasMemory) setTimeout(() => this._prefetchPOIs(), 600);
+        else this._prefetchPOIs(); // still runs but allCached check will skip network
       });
 
     } catch (e) {
@@ -883,7 +896,7 @@ class MeerkatMapCard extends HTMLElement {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
           const { ts, elements } = JSON.parse(cached);
-          if (Date.now() - ts < 172800000) {  // 48-hour cache TTL
+          if (Date.now() - ts < this._cacheTTL) {  // configurable TTL
             this._renderPOILayer(cat, elements);
             fromCache = true;
             continue; // valid cache — no network request needed
@@ -954,7 +967,7 @@ class MeerkatMapCard extends HTMLElement {
         const raw = localStorage.getItem(key);
         if (raw) {
           const { ts } = JSON.parse(raw);
-          if (Date.now() - ts < 172800000) return true;
+          if (Date.now() - ts < this._cacheTTL) return true;
         }
       } catch (_) {}
       return this._poiCacheFallback(cat, vs, vw, vn, ve) !== null;
@@ -1000,7 +1013,7 @@ class MeerkatMapCard extends HTMLElement {
         const raw = localStorage.getItem(this._poiCacheKey(cat, s, w, n, e));
         if (raw) {
           const { ts, els } = JSON.parse(raw);
-          if (Date.now() - ts < 172800000) elements = els;
+          if (Date.now() - ts < this._cacheTTL) elements = els;
         }
       } catch (_) {}
 
@@ -1031,7 +1044,7 @@ class MeerkatMapCard extends HTMLElement {
           const raw = localStorage.getItem(k);
           if (raw) {
             const { ts, elements } = JSON.parse(raw);
-            if (Date.now() - ts < 172800000) return elements;
+            if (Date.now() - ts < this._cacheTTL) return elements;
           }
         }
       }
@@ -1310,6 +1323,7 @@ class MeerkatMapCard extends HTMLElement {
   // States: idle (white), loading (yellow+pulse), success (green+pulse→idle), error (red+pulse)
   // r=22, circumference = 2π×22 ≈ 138.23
   static get _RING_CIRC() { return 2 * Math.PI * 22; }
+  get _cacheTTL() { return ((this._config && this._config.cache_ttl_hours) || 48) * 3600000; }
 
   _ringEl()  { return this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring'); }
   _arcEl()   { return this.shadowRoot && this.shadowRoot.getElementById('mm-ring-arc'); }
@@ -1343,20 +1357,26 @@ class MeerkatMapCard extends HTMLElement {
       btn.style.background = 'rgba(30,30,34,0.75)';
       btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="#34C759"/></svg>';
       btn.title = 'Refresh POI data';
-      btn.onclick = () => { this._forceRefreshPOIs(); };
+      btn.onclick = () => { this._confirmRefreshPOIs(); };
       clearTimeout(this._ringFadeTimer);
       this._ringFadeTimer = setTimeout(() => {
         if (this._ringState === 'success') this._setRingState('idle');
       }, 2000);
 
     } else if (state === 'error') {
-      ring.classList.add('mm-ring-error');
+      // Full red ring, then fade to idle over 3s
       arc.setAttribute('stroke', '#FF3B30');
-      arc.style.strokeDasharray = `${circ * 0.3} ${circ * 0.7}`;
+      arc.style.strokeDasharray = `${circ} 0`;
+      ring.classList.add('mm-ring-error-fade');
       btn.style.background = 'rgba(30,30,34,0.75)';
       btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="#FF3B30"/></svg>';
       btn.title = 'Retry loading POI data';
-      btn.onclick = () => { this._forceRefreshPOIs(); };
+      btn.onclick = () => { this._confirmRefreshPOIs(); };
+      // Auto-transition to idle after fade completes
+      clearTimeout(this._ringFadeTimer);
+      this._ringFadeTimer = setTimeout(() => {
+        if (this._ringState === 'error') this._setRingState('idle');
+      }, 3200);
 
     } else { // idle
       arc.setAttribute('stroke', 'rgba(255,255,255,0.35)');
@@ -1364,7 +1384,7 @@ class MeerkatMapCard extends HTMLElement {
       btn.style.background = 'rgba(30,30,34,0.75)';
       btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="rgba(255,255,255,0.65)"/></svg>';
       btn.title = 'Refresh POI data';
-      btn.onclick = () => { this._forceRefreshPOIs(); };
+      btn.onclick = () => { this._confirmRefreshPOIs(); };
     }
   }
 
@@ -1373,6 +1393,46 @@ class MeerkatMapCard extends HTMLElement {
     this._poiFetching = {};
     this._ringTotal = 0; this._ringDone = 0;
     this._setRingState('idle');
+  }
+
+  _confirmRefreshPOIs() {
+    const isDark   = this._isDark();
+    const bg       = isDark ? 'rgba(28,28,30,0.96)' : 'rgba(252,252,254,0.98)';
+    const tx       = isDark ? '#fff' : '#000';
+    const sub      = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)';
+    const bd       = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `position:fixed;inset:0;z-index:99999;display:flex;align-items:flex-end;justify-content:center;padding:0 0 24px;background:rgba(0,0,0,0.5);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);animation:mmFadeIn 0.2s ease;`;
+
+    const sheet = document.createElement('style');
+    sheet.textContent = `@keyframes mmFadeIn{from{opacity:0}to{opacity:1}}@keyframes mmSlideUp{from{transform:translateY(24px) scale(0.97);opacity:0}to{transform:none;opacity:1}}`;
+    overlay.appendChild(sheet);
+
+    const panel = document.createElement('div');
+    panel.style.cssText = `background:${bg};backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:1px solid ${bd};border-radius:24px;padding:28px 24px 20px;width:calc(100% - 32px);max-width:400px;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;color:${tx};animation:mmSlideUp 0.28s cubic-bezier(0.34,1.3,0.64,1);text-align:center;`;
+
+    panel.innerHTML = `
+      <div style="font-size:36px;margin-bottom:14px;">🔄</div>
+      <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:10px;">Reload Points of Interest?</div>
+      <div style="font-size:14px;color:${sub};line-height:1.5;margin-bottom:24px;">
+        This will clear the saved map data for this area and download fresh information from OpenStreetMap.
+        It may take a moment to load, especially on mobile.
+      </div>
+      <button id="mm-confirm-yes" style="width:100%;padding:14px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;font-family:inherit;">Reload Data</button>
+      <button id="mm-confirm-no"  style="width:100%;padding:14px;border:none;border-radius:14px;background:${isDark?'rgba(255,255,255,0.1)':' rgba(0,0,0,0.07)'};color:${tx};font-size:16px;font-weight:500;cursor:pointer;font-family:inherit;">Cancel</button>
+    `;
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    panel.querySelector('#mm-confirm-no').addEventListener('click', close);
+    panel.querySelector('#mm-confirm-yes').addEventListener('click', () => {
+      close();
+      this._forceRefreshPOIs();
+    });
   }
 
   _forceRefreshPOIs() {
@@ -1628,6 +1688,34 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
+        <!-- Cache Settings -->
+        <div>
+          <div class="section-title">Cache Settings</div>
+          <div class="card-block">
+            <div class="select-row">
+              <label>Cache Duration</label>
+              <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:8px;line-height:1.4;">
+                How long POI data is kept before being refreshed. POIs like bus stops and hospitals change very rarely — 48 hours is the recommended sweet spot between freshness and speed.
+              </div>
+              <select id="cache_ttl_hours">
+                <option value="6"   ${(cfg.cache_ttl_hours||48)===6   ?'selected':''}>6 hours</option>
+                <option value="12"  ${(cfg.cache_ttl_hours||48)===12  ?'selected':''}>12 hours</option>
+                <option value="24"  ${(cfg.cache_ttl_hours||48)===24  ?'selected':''}>24 hours</option>
+                <option value="48"  ${(cfg.cache_ttl_hours||48)===48  ?'selected':''}>48 hours ⭐ Recommended</option>
+                <option value="72"  ${(cfg.cache_ttl_hours||48)===72  ?'selected':''}>3 days</option>
+                <option value="168" ${(cfg.cache_ttl_hours||48)===168 ?'selected':''}>1 week</option>
+              </select>
+            </div>
+            <div class="select-row" style="border-top:1px solid var(--divider-color,rgba(0,0,0,0.06));">
+              <label>Clear Cached Data</label>
+              <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:8px;line-height:1.4;">
+                Removes all saved POI data from this device. Useful if you notice outdated information on the map.
+              </div>
+              <button id="mm-clear-cache-btn" style="padding:10px 16px;border:none;border-radius:10px;background:#FF3B30;color:#fff;font-size:14px;font-weight:600;cursor:pointer;width:100%;font-family:inherit;">Clear All Cached POI Data</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Points of Interest -->
         <div>
           <div class="section-title">Points of Interest</div>
@@ -1674,6 +1762,25 @@ class MeerkatMapCardEditor extends HTMLElement {
       el.onchange = () => this._updateConfig(el.dataset.key, el.checked);
     });
 
+    const ttlSel = root.getElementById('cache_ttl_hours');
+    if (ttlSel) ttlSel.onchange = e => this._updateConfig('cache_ttl_hours', parseInt(e.target.value));
+
+    const clearBtn = root.getElementById('mm-clear-cache-btn');
+    if (clearBtn) clearBtn.onclick = () => {
+      if (confirm('Clear all saved POI data from this device?')) {
+        try {
+          const keys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('mmPOI:')) keys.push(k);
+          }
+          keys.forEach(k => localStorage.removeItem(k));
+          clearBtn.textContent = `Cleared ${keys.length} entries`;
+          setTimeout(() => { clearBtn.textContent = 'Clear All Cached POI Data'; }, 2000);
+        } catch (_) {}
+      }
+    };
+
     // Accent colour
     // accent_color removed
   }
@@ -1685,6 +1792,7 @@ class MeerkatMapCardEditor extends HTMLElement {
     if (el('person_entity'))   el('person_entity').value   = cfg.person_entity   || '';
     if (el('geocoded_entity')) el('geocoded_entity').value = cfg.geocoded_entity || '';
     root.querySelectorAll('input[name="dist"]').forEach(r => r.checked = r.value === (cfg.distance_unit||'metric'));
+    if (el('cache_ttl_hours')) el('cache_ttl_hours').value = cfg.cache_ttl_hours || 48;
     if (el('map_height'))      el('map_height').value      = cfg.map_height      || 420;
     if (el('zoom_level'))      el('zoom_level').value      = cfg.zoom_level      || 15;
     root.querySelectorAll('input[name="theme"]').forEach(r => r.checked = r.value === (cfg.theme || 'dark'));
