@@ -1,10 +1,14 @@
 # Meerkat Map Card
 
-Track a person entity on a live OpenStreetMap with an animated pulsing marker, points of interest, distance calculations, and full address lookup — all from a single Dashboard card.
+Track a person entity on a live OpenStreetMap with an animated pulsing marker, points of interest, distance calculations, and full address lookup — all from a single Lovelace card.
 
 ## Person tracking
 
 The person marker is colour-coded by zone — green when home, orange when away. Tap it to open a popup showing zone name, last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address.
+
+## POI quick-select
+
+Tap the map pin button in the top-right controls to open a bottom sheet where you can toggle any of the 53 POI categories directly on the map — no need to open the editor. Changes take effect immediately and are saved to your dashboard configuration.
 
 ## Points of interest
 
@@ -48,7 +52,7 @@ All settings are configurable through the built-in visual editor — no YAML req
 - Dark / Light / Auto theme
 - Distance units (km/m, mi/m, or mi/yd)
 - Cache duration and clear cache button
-- 53 POI category toggles organised into 7 groups
+- 53 POI category toggles organised into 7 groups (also accessible via the map pin button on the map)
 
 ## Compatibility
 
