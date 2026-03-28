@@ -13,7 +13,8 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 - **Live person tracking** — animated pulsing marker, colour-coded by zone (green = home, orange = away)
 - **Person popup** — tap the marker to see zone, last updated, GPS accuracy, battery, speed, altitude, full address, and coordinates
 - **Points of interest** — 53 categories across 7 groups, fetched from OpenStreetMap via Overpass API
-- **Smart POI caching** — results cached for 48 hours; revisiting a location loads instantly with no network request
+- **Smart POI caching** — results cached for a configurable duration (default 48 hours); revisiting a location loads instantly from cache with no network request
+- **POI status ring** — always-visible indicator showing loading, success, and error states with a centre button to stop or refresh
 - **POI popup** — tap any POI to see name, address, distance from person, opening hours, phone (tappable to call), website (icon clickable), and more
 - **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
@@ -33,7 +34,6 @@ Click the button above, or:
 2. Add `https://github.com/jamesmcginnis/meerkat-map-card` with category **Frontend**
 3. Install **Meerkat Map Card**
 4. Refresh your browser
-
 
 ### Manual
 
@@ -61,7 +61,7 @@ To fix this, install the **Home Assistant Web Proxy** integration. It routes Ove
 
 ### Step 2 — Add the Overpass URL patterns
 
-The card races three Overpass mirrors simultaneously and uses whichever responds first. Add all three to get the fastest possible load times:
+The card races three Overpass mirrors simultaneously and uses whichever responds first. Add all three for the fastest possible load times:
 
 1. Settings → Devices & Services → find **Home Assistant Web Proxy** → **Configure**
 2. Click **+ ADD** and enter `https://overpass-api.de/*`
@@ -71,7 +71,7 @@ The card races three Overpass mirrors simultaneously and uses whichever responds
 
 No restart needed after step 2. The card automatically uses the proxy on iOS and falls back to direct connections on desktop.
 
-> **Why three mirrors?** Each is an independent Overpass server in a different location. By racing them simultaneously the card uses whichever responds fastest at that moment, significantly reducing load times compared to relying on a single server.
+> **Why three mirrors?** Each is an independent Overpass server in a different location. Racing them simultaneously means the card always uses whichever is fastest at that moment.
 
 ---
 
@@ -87,7 +87,7 @@ theme: dark
 map_height: 420
 zoom_level: 15
 distance_unit: metric
-# Only a few POI categories are enabled by default — see performance note below
+cache_ttl_hours: 48
 show_train_stations: true
 show_bus_stops: true
 show_hospitals: true
@@ -100,21 +100,22 @@ show_supermarkets: true
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `person_entity` | string | — | Entity ID of the person or device tracker to display |
-| `geocoded_entity` | string | — | Optional. HA companion app geocoded location sensor for full address inc. house number (e.g. `sensor.sarahs_iphone_geocoded_location`) |
+| `geocoded_entity` | string | — | Optional. HA companion app geocoded location sensor for full address inc. house number |
 | `theme` | string | `dark` | Map colour scheme: `dark`, `light`, or `auto` |
 | `map_height` | number | `420` | Height of the map in pixels |
 | `zoom_level` | number | `15` | Default zoom level (1–20) |
-| `distance_unit` | string | `metric` | Distance units in POI popups: `metric` (km/m), `mixed` (mi/m), or `imperial` (mi/yd) |
+| `distance_unit` | string | `metric` | Distance units: `metric` (km/m), `mixed` (mi/m), or `imperial` (mi/yd) |
+| `cache_ttl_hours` | number | `48` | How long POI data is cached before a refresh is needed (hours) |
 
-For a full list of the 53 POI `show_*` keys, see the visual editor — all categories are listed there with toggles.
+For a full list of the 53 POI `show_*` keys, see the visual editor.
 
 ---
 
 ## Points of Interest
 
-> ⚠️ **Performance note:** Enable only a small number of POI categories at once, especially on mobile. Each batch of up to 5 categories uses one network request — enabling more increases load time. Stick to the categories most useful to you for the best experience.
+> ⚠️ **Performance note:** Enable only a small number of POI categories at once, especially on mobile. Each batch of up to 5 categories uses one network request — enabling more increases load time.
 
-POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) and cached in `localStorage` for 48 hours. Returning to a location you have visited before loads instantly from cache with no network request and no loading indicator.
+POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) and cached locally. Returning to a location you have visited before loads instantly from cache with no network request and no loading indicator. The cache duration is configurable in the visual editor (default 48 hours — recommended).
 
 The card includes several optimisations to minimise load time:
 
@@ -123,9 +124,9 @@ The card includes several optimisations to minimise load time:
 - Each mirror has a 20-second timeout so a slow server never blocks the others
 - A 25% expanded area is fetched on first load so short pans are already cached
 - Zooming in never triggers a refetch — the data is already loaded
-- Panning to a new area immediately cancels in-flight requests for the old location
-- A 1.5-second pause after panning avoids wasted fetches mid-drag
-- Stale fetch callbacks from previous locations are ignored — the loading ring can never get stuck
+- A 2.5-second pause after panning avoids wasted fetches mid-drag
+- Panning to a new area cancels in-flight requests for the old location
+- Navigating away and returning never triggers a refetch if data is already cached
 
 The 53 categories are organised into 7 groups in the visual editor:
 
@@ -138,30 +139,44 @@ The 53 categories are organised into 7 groups in the visual editor:
 - **Recreation** — Parks, Playgrounds, Sports Centres, Swimming Pools, Golf, Hotels, Attractions, Viewpoints, Campsites
 - **Utilities & Environment** — Toilets, Drinking Water, Benches, Recycling
 
-Tapping a POI marker shows its name, address, opening hours, phone number (tap to call), website (tap icon or link to open), brand, distance from the tracked person, and more.
-
 **Enabled by default:** Train Stations, Bus Stops, Hospitals, Pharmacies, Supermarkets.
+
+---
+
+## POI Status Ring
+
+A small ring in the bottom-left corner of the map shows the current state of POI data loading:
+
+| State | Colour | Meaning |
+|-------|--------|---------|
+| **Idle** | White | Data loaded and up to date |
+| **Loading** | Yellow, breathing | Fetching data from Overpass |
+| **Success** | Green, pulsing | Data loaded successfully |
+| **Error** | Red, fades to white | Fetch failed — tap the centre button to retry |
+
+The centre button changes depending on state — a stop icon while loading, a refresh icon otherwise. Tapping the refresh button shows a confirmation prompt before clearing the cache and reloading.
+
+---
+
+## Cache Settings
+
+The visual editor includes a **Cache Settings** section with two options:
+
+**Cache Duration** — controls how long POI data is kept before the card considers it stale. Options range from 6 hours to 1 week. The default of 48 hours is recommended: POIs like bus stops, hospitals, and shops change very rarely, so there is no benefit to fetching them more frequently.
+
+**Clear All Cached POI Data** — removes all saved POI data from the device immediately. Useful if you notice outdated information on the map.
 
 ---
 
 ## Person Popup
 
-Tap the person marker to see:
-
-- Zone name (Home, Away, or a custom zone label)
-- Last updated time
-- GPS accuracy
-- Battery level
-- Speed
-- Altitude
-- Coordinates
-- Full address (from geocoded sensor or Nominatim fallback)
+Tap the person marker to see zone name, last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address.
 
 ---
 
 ## Geocoded Location Sensor
 
-The `geocoded_entity` option is the most reliable way to display a full address including the house number. The HA companion app (iOS and Android) creates this sensor automatically when location permissions are granted — it is the same sensor used by the built-in tile card and usually appears as `sensor.<your_name>_geocoded_location`.
+The `geocoded_entity` option is the most reliable way to display a full address including the house number. The HA companion app (iOS and Android) creates this sensor automatically when location permissions are granted — it usually appears as `sensor.<your_name>_geocoded_location`.
 
 Without this option the card falls back to [Nominatim](https://nominatim.openstreetmap.org/) reverse geocoding, which may omit the house number for some residential addresses.
 
