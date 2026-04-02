@@ -735,8 +735,7 @@ class MeerkatMapCard extends HTMLElement {
       const zoneColor = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : '#AF52DE';
       const picUrl    = state.attributes?.entity_picture || '';
       const name      = state.attributes?.friendly_name || entityId;
-      const distLabel = hasMainPos ? this._distanceTo(mainLat, mainLng, lat, lng) : '';
-      const safeId    = entityId.replace(/\W/g, '_');
+      const safeId = entityId.replace(/\W/g, '_');
 
       const iconHTML = `
         <div style="position:relative;width:44px;height:44px;cursor:pointer;">
@@ -753,7 +752,6 @@ class MeerkatMapCard extends HTMLElement {
               : `<span style="font-size:16px;font-weight:700;color:${zoneColor};font-family:-apple-system,sans-serif;">${(name[0]||'?').toUpperCase()}</span>`
             }
           </div>
-          ${distLabel ? `<div style="position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);background:${isDark?'rgba(0,0,0,0.78)':'rgba(255,255,255,0.92)'};color:${isDark?'#fff':'#000'};font-size:9px;font-weight:700;padding:2px 5px;border-radius:8px;white-space:nowrap;pointer-events:none;font-family:-apple-system,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,0.3);">${distLabel}</div>` : ''}
         </div>`;
 
       const icon = L.divIcon({ html: iconHTML, className: '', iconSize: [44, 44], iconAnchor: [22, 22] });
@@ -876,7 +874,7 @@ class MeerkatMapCard extends HTMLElement {
     overlay.addEventListener('click', () => this._closeAllOverlays());
     popup.querySelector('#mm-family-popup-close').addEventListener('click', () => this._closeAllOverlays());
 
-    this._reverseGeocode(lat, lng).then(addr => {
+    this._reverseGeocode(lat, lng, true).then(addr => {
       const valEl = geoRow.querySelector('.mm-info-value');
       if (valEl) { valEl.textContent = addr; valEl.style.fontStyle = 'normal'; valEl.style.color = textCol; }
     });
@@ -1031,12 +1029,15 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // ── Reverse geocode ───────────────────────────────────────────────
-  async _reverseGeocode(lat, lng) {
-    // Prefer HA geocoded sensor — has full address including house number
-    const geoEnt = this._config.geocoded_entity;
-    if (geoEnt && this._hass && this._hass.states[geoEnt]) {
-      const st = this._hass.states[geoEnt].state;
-      if (st && st !== 'unknown' && st !== 'unavailable') return st;
+  async _reverseGeocode(lat, lng, skipSensor) {
+    // Prefer HA geocoded sensor — has full address including house number.
+    // Only use it for the main person (skipSensor=true bypasses it for family members).
+    if (!skipSensor) {
+      const geoEnt = this._config.geocoded_entity;
+      if (geoEnt && this._hass && this._hass.states[geoEnt]) {
+        const st = this._hass.states[geoEnt].state;
+        if (st && st !== 'unknown' && st !== 'unavailable') return st;
+      }
     }
     const key = `v10:${lat.toFixed(4)},${lng.toFixed(4)}`;
     if (this._geocodeCache[key]) return this._geocodeCache[key];
@@ -1161,9 +1162,94 @@ class MeerkatMapCard extends HTMLElement {
     geoRow.innerHTML = `<span class="mm-info-label">Address</span><span class="mm-info-value" style="color:${subCol};font-style:italic;">Loading…</span>`;
     infoWrap.appendChild(geoRow);
 
-
     popup.appendChild(header);
     popup.appendChild(infoWrap);
+
+    // ── Family members section ────────────────────────────────────
+    const members = Array.isArray(this._config?.family_members) ? this._config.family_members : [];
+    if (members.length > 0) {
+      const divider = document.createElement('div');
+      divider.style.cssText = `margin:0 20px;height:1px;background:${rowBorder};`;
+      popup.appendChild(divider);
+
+      const familySection = document.createElement('div');
+      familySection.style.cssText = 'padding:12px 20px 16px;';
+
+      const sectionHead = document.createElement('div');
+      sectionHead.style.cssText = `font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:${subCol};margin-bottom:10px;`;
+      sectionHead.textContent = 'Family';
+      familySection.appendChild(sectionHead);
+
+      const memberRows = document.createElement('div');
+      memberRows.style.cssText = 'display:flex;flex-direction:column;gap:0;';
+
+      members.forEach((entityId, i) => {
+        const mState  = this._hass?.states[entityId];
+        if (!mState) return;
+        const mName   = mState.attributes?.friendly_name || entityId;
+        const mPicUrl = mState.attributes?.entity_picture || '';
+        const mZone   = this._getZone(mState);
+        const mColor  = mZone === 'home' ? '#34C759' : mZone === 'not_home' ? '#FF9500' : '#AF52DE';
+        const mLat    = parseFloat(mState.attributes?.latitude);
+        const mLng    = parseFloat(mState.attributes?.longitude);
+        const hasMPos = !isNaN(mLat) && !isNaN(mLng);
+        const distStr = hasMPos ? this._distanceTo(lat, lng, mLat, mLng) : null;
+
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex;align-items:center;gap:12px;padding:10px 0;cursor:pointer;border-radius:10px;transition:background 0.15s;${i > 0 ? 'border-top:1px solid ' + rowBorder + ';' : ''}`;
+        row.addEventListener('mouseenter', () => row.style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)');
+        row.addEventListener('mouseleave', () => row.style.background = 'transparent');
+
+        const avatar = document.createElement('div');
+        avatar.style.cssText = `width:38px;height:38px;border-radius:50%;overflow:hidden;border:2px solid ${mColor};flex-shrink:0;background:${isDark ? '#2c2c2e' : '#e0e0e0'};display:flex;align-items:center;justify-content:center;`;
+        avatar.innerHTML = mPicUrl
+          ? `<img src="${mPicUrl}" style="width:100%;height:100%;object-fit:cover;" alt="${mName}">`
+          : `<span style="font-size:15px;font-weight:700;color:${mColor};">${(mName[0]||'?').toUpperCase()}</span>`;
+
+        const info = document.createElement('div');
+        info.style.cssText = 'flex:1;min-width:0;';
+        info.innerHTML = `<div style="font-size:14px;font-weight:600;color:${textCol};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${mName}</div>`;
+
+        // Address placeholder + distance
+        const addrLine = document.createElement('div');
+        addrLine.style.cssText = `font-size:11px;color:${subCol};margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+        addrLine.textContent = 'Loading address…';
+        info.appendChild(addrLine);
+
+        if (hasMPos) {
+          this._reverseGeocode(mLat, mLng, true).then(addr => {
+            addrLine.textContent = addr;
+          });
+        } else {
+          addrLine.textContent = 'Location unavailable';
+        }
+
+        const meta = document.createElement('div');
+        meta.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;';
+        if (distStr) {
+          meta.innerHTML = `<span style="font-size:13px;font-weight:700;color:${textCol};">${distStr}</span>`;
+        }
+        // Chevron
+        meta.innerHTML += `<svg viewBox="0 0 24 24" width="14" height="14" style="opacity:0.35;"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z" fill="${textCol}"/></svg>`;
+
+        row.appendChild(avatar);
+        row.appendChild(info);
+        row.appendChild(meta);
+        memberRows.appendChild(row);
+
+        if (hasMPos) {
+          row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._closeAllOverlays();
+            this._map.flyTo([mLat, mLng], parseInt(this._config.zoom_level) || 15, { duration: 1.4 });
+          });
+        }
+      });
+
+      familySection.appendChild(memberRows);
+      popup.appendChild(familySection);
+    }
+
     overlay.appendChild(popup);
     document.body.appendChild(overlay);
     this._activeOverlay = overlay;
@@ -1171,7 +1257,7 @@ class MeerkatMapCard extends HTMLElement {
     overlay.addEventListener('click', () => this._closeAllOverlays());
     popup.querySelector('#mm-popup-close').addEventListener('click', () => this._closeAllOverlays());
 
-    // Geocode async
+    // Geocode async — own address
     this._reverseGeocode(lat, lng).then(addr => {
       const valEl = geoRow.querySelector('.mm-info-value');
       if (valEl) { valEl.textContent = addr; valEl.style.fontStyle = 'normal'; valEl.style.color = textCol; }
