@@ -181,6 +181,8 @@ class MeerkatMapCard extends HTMLElement {
     this._map         = null;
     this._tileLayer   = null;
     this._personMarker = null;
+    this._familyMarkers = {};   // entityId → Leaflet marker
+    this._familyLines   = {};   // entityId → Leaflet polyline
     this._poiLayers   = {};
     this._geocodeCache = {};
     this._activeOverlay = null;
@@ -199,6 +201,7 @@ class MeerkatMapCard extends HTMLElement {
     return {
       person_entity:       '',
       geocoded_entity:     '',
+      family_members:      [],   // array of entity IDs to track alongside the main person
       theme:               'dark',
       map_height:          420,
       zoom_level:          15,
@@ -291,7 +294,7 @@ class MeerkatMapCard extends HTMLElement {
     this._hass = hass;
     if (!this.shadowRoot.innerHTML) this._render();
     if (!this._mapInitialised)      this._initMap();
-    else                            this._updateMap();
+    else                            { this._updateMap(); this._updateFamilyMarkers(); }
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────
@@ -313,6 +316,8 @@ class MeerkatMapCard extends HTMLElement {
       this._map          = null;
       this._tileLayer    = null;
       this._personMarker = null;  // must null so re-init creates a fresh marker
+      this._familyMarkers = {};
+      this._familyLines   = {};
       this._poiLayers    = {};
       this._poiFetching  = {};
     }
@@ -636,6 +641,7 @@ class MeerkatMapCard extends HTMLElement {
     }
 
     this._updatePersonMarker(state, lat, lng);
+    this._updateFamilyMarkers();
   }
 
   // ── Person marker ─────────────────────────────────────────────────
@@ -694,6 +700,186 @@ class MeerkatMapCard extends HTMLElement {
 
     this._personMarker.off('click');
     this._personMarker.on('click', () => this._openPersonPopup(state, lat, lng));
+  }
+
+  // ── Family member markers ─────────────────────────────────────────
+  _updateFamilyMarkers() {
+    if (!this._mapInitialised || !this._map || !this._hass) return;
+    const L = window.L;
+    const members = Array.isArray(this._config?.family_members) ? this._config.family_members : [];
+
+    // Remove markers/lines for members no longer in config
+    const currentIds = new Set(members);
+    for (const id of Object.keys(this._familyMarkers)) {
+      if (!currentIds.has(id)) {
+        this._map.removeLayer(this._familyMarkers[id]);
+        delete this._familyMarkers[id];
+        if (this._familyLines[id]) { this._map.removeLayer(this._familyLines[id]); delete this._familyLines[id]; }
+      }
+    }
+
+    const mainState = this._hass.states[this._config?.person_entity];
+    const mainLat   = parseFloat(mainState?.attributes?.latitude);
+    const mainLng   = parseFloat(mainState?.attributes?.longitude);
+    const hasMainPos = !isNaN(mainLat) && !isNaN(mainLng);
+
+    for (const entityId of members) {
+      const state = this._hass.states[entityId];
+      if (!state) continue;
+      const lat = parseFloat(state.attributes?.latitude);
+      const lng = parseFloat(state.attributes?.longitude);
+      if (isNaN(lat) || isNaN(lng)) continue;
+
+      const isDark    = this._isDark();
+      const zone      = this._getZone(state);
+      const zoneColor = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : '#AF52DE';
+      const picUrl    = state.attributes?.entity_picture || '';
+      const name      = state.attributes?.friendly_name || entityId;
+      const distLabel = hasMainPos ? this._distanceTo(mainLat, mainLng, lat, lng) : '';
+      const safeId    = entityId.replace(/\W/g, '_');
+
+      const iconHTML = `
+        <div style="position:relative;width:44px;height:44px;cursor:pointer;">
+          <style>
+            @keyframes mmFamilyPulse_${safeId} {
+              0%   { box-shadow: 0 0 0 0 ${zoneColor}55; }
+              50%  { box-shadow: 0 0 0 8px rgba(0,0,0,0); }
+              100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+            }
+          </style>
+          <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};box-shadow:0 3px 12px rgba(0,0,0,0.4);background:${isDark ? '#1c1c1e' : '#f0f0f0'};display:flex;align-items:center;justify-content:center;animation:mmFamilyPulse_${safeId} 3s ease-in-out infinite;">
+            ${picUrl
+              ? `<img src="${picUrl}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
+              : `<span style="font-size:16px;font-weight:700;color:${zoneColor};font-family:-apple-system,sans-serif;">${(name[0]||'?').toUpperCase()}</span>`
+            }
+          </div>
+          ${distLabel ? `<div style="position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);background:${isDark?'rgba(0,0,0,0.78)':'rgba(255,255,255,0.92)'};color:${isDark?'#fff':'#000'};font-size:9px;font-weight:700;padding:2px 5px;border-radius:8px;white-space:nowrap;pointer-events:none;font-family:-apple-system,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,0.3);">${distLabel}</div>` : ''}
+        </div>`;
+
+      const icon = L.divIcon({ html: iconHTML, className: '', iconSize: [44, 44], iconAnchor: [22, 22] });
+
+      if (this._familyMarkers[entityId]) {
+        this._familyMarkers[entityId].setLatLng([lat, lng]).setIcon(icon);
+      } else {
+        this._familyMarkers[entityId] = L.marker([lat, lng], { icon, zIndexOffset: 900 }).addTo(this._map);
+      }
+      this._familyMarkers[entityId].off('click');
+      this._familyMarkers[entityId].on('click', () => this._openFamilyMemberPopup(state, lat, lng));
+
+      // Dashed line from main person to family member
+      if (hasMainPos) {
+        const lineOpts = { color: zoneColor, weight: 2, opacity: 0.45, dashArray: '5, 9' };
+        if (this._familyLines[entityId]) {
+          this._familyLines[entityId].setLatLngs([[mainLat, mainLng], [lat, lng]]).setStyle(lineOpts);
+        } else {
+          this._familyLines[entityId] = L.polyline([[mainLat, mainLng], [lat, lng]], lineOpts).addTo(this._map);
+        }
+      }
+    }
+  }
+
+  // ── Family member popup ───────────────────────────────────────────
+  async _openFamilyMemberPopup(state, lat, lng) {
+    this._closeAllOverlays();
+    const isDark    = this._isDark();
+    const accent    = '#AF52DE';
+    const zone      = this._getZone(state);
+    const zoneLabel = this._getZoneLabel(state);
+    const zoneColor = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : accent;
+    const name      = state.attributes?.friendly_name || state.entity_id;
+    const picUrl    = state.attributes?.entity_picture || '';
+    const lastChanged = state.last_changed || state.last_updated;
+    const timeAgo   = _mmTimeAgo(lastChanged);
+    const battery   = state.attributes?.battery_level ?? state.attributes?.battery ?? null;
+    const accuracy  = state.attributes?.gps_accuracy ?? null;
+    const speed     = state.attributes?.speed ?? null;
+    const altitude  = state.attributes?.altitude ?? null;
+
+    const bgBase    = isDark ? '28,28,30' : '252,252,254';
+    const popupBg   = isDark ? `rgba(${bgBase},0.94)` : `rgba(${bgBase},0.96)`;
+    const textCol   = isDark ? '#fff' : '#000';
+    const subCol    = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)';
+    const borderC   = isDark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.08)';
+    const rowBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `position:fixed;inset:0;z-index:99999;display:flex;align-items:flex-end;justify-content:center;padding:0 0 16px;background:rgba(0,0,0,0.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);animation:mmFadeIn 0.2s ease;`;
+
+    const style = document.createElement('style');
+    style.textContent = MM_POPUP_KEYFRAMES + `
+      .mm-popup { animation: mmSlideUp 0.28s cubic-bezier(0.34,1.3,0.64,1); }
+      .mm-info-row { display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid ${rowBorder}; }
+      .mm-info-row:last-child { border-bottom:none; }
+      .mm-info-label { font-size:12px;color:${subCol};font-weight:500; }
+      .mm-info-value { font-size:13px;font-weight:600;color:${textCol};text-align:right;max-width:200px;word-break:break-word; }
+      .mm-zone-pill { display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.04em; }
+    `;
+    overlay.appendChild(style);
+
+    const popup = document.createElement('div');
+    popup.className = 'mm-popup';
+    popup.style.cssText = `background:${popupBg};backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:1px solid ${borderC};border-radius:24px 24px 20px 20px;box-shadow:0 -8px 48px rgba(0,0,0,0.5),0 0 0 0.5px ${borderC};padding:0 0 4px;width:100%;max-width:440px;max-height:82vh;overflow-y:auto;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',sans-serif;color:${textCol};`;
+    popup.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+    popup.addEventListener('click', e => e.stopPropagation());
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:14px;padding:10px 20px 14px;';
+    header.innerHTML = `
+      <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};flex-shrink:0;background:${isDark ? '#2c2c2e' : '#e0e0e0'};display:flex;align-items:center;justify-content:center;">
+        ${picUrl ? `<img src="${picUrl}" style="width:100%;height:100%;object-fit:cover;" alt="${name}">` : `<span style="font-size:22px;font-weight:700;color:${zoneColor};">${(name[0]||'?').toUpperCase()}</span>`}
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:4px;">${name}</div>
+        <span class="mm-zone-pill" style="background:${zoneColor}22;color:${zoneColor};border:1px solid ${zoneColor}44;">
+          <svg viewBox="0 0 24 24" width="11" height="11"><path d="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0,9.5c-1.38,0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5,1.12 2.5,2.5-1.12,2.5-2.5,2.5z" fill="${zoneColor}"/></svg>
+          ${zoneLabel}
+        </span>
+      </div>
+      <button id="mm-family-popup-close" style="background:${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)'};border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:${subCol};font-size:16px;flex-shrink:0;transition:background 0.15s;">✕</button>`;
+
+    const infoWrap = document.createElement('div');
+    infoWrap.style.cssText = 'padding:4px 20px 12px;';
+
+    const addRow = (label, value) => {
+      if (!value && value !== 0) return;
+      infoWrap.innerHTML += `<div class="mm-info-row"><span class="mm-info-label">${label}</span><span class="mm-info-value">${value}</span></div>`;
+    };
+
+    addRow('Last updated', timeAgo);
+    if (accuracy !== null) addRow('GPS accuracy', `±${Math.round(accuracy)} m`);
+    if (battery   !== null) addRow('Battery', `${Math.round(battery)}%`);
+    if (speed     !== null) addRow('Speed', `${Math.round(speed * 3.6)} km/h`);
+    if (altitude  !== null) addRow('Altitude', `${Math.round(altitude)} m`);
+
+    // Distance from main person
+    const mainState = this._hass?.states[this._config?.person_entity];
+    const mainLat   = parseFloat(mainState?.attributes?.latitude);
+    const mainLng   = parseFloat(mainState?.attributes?.longitude);
+    if (!isNaN(mainLat) && !isNaN(mainLng)) {
+      addRow('Distance from you', this._distanceTo(mainLat, mainLng, lat, lng));
+    }
+
+    addRow('Coordinates', `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+
+    // Geocode placeholder
+    const geoRow = document.createElement('div');
+    geoRow.className = 'mm-info-row';
+    geoRow.innerHTML = `<span class="mm-info-label">Address</span><span class="mm-info-value" style="color:${subCol};font-style:italic;">Loading…</span>`;
+    infoWrap.appendChild(geoRow);
+
+    popup.appendChild(header);
+    popup.appendChild(infoWrap);
+    overlay.appendChild(popup);
+    document.body.appendChild(overlay);
+    this._activeOverlay = overlay;
+
+    overlay.addEventListener('click', () => this._closeAllOverlays());
+    popup.querySelector('#mm-family-popup-close').addEventListener('click', () => this._closeAllOverlays());
+
+    this._reverseGeocode(lat, lng).then(addr => {
+      const valEl = geoRow.querySelector('.mm-info-value');
+      if (valEl) { valEl.textContent = addr; valEl.style.fontStyle = 'normal'; valEl.style.color = textCol; }
+    });
   }
 
   // ── Centre on person ──────────────────────────────────────────────
@@ -1810,6 +1996,20 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
+        <!-- Family Members -->
+        <div>
+          <div class="section-title">Family Members</div>
+          <div class="hint" style="margin-bottom:6px;">Track other people on the map — like Apple FindMy. Click their marker to see location details and distance from you.</div>
+          <div class="card-block">
+            <div style="padding:10px 12px 0;">
+              <input type="text" id="mm-family-search" placeholder="Filter people…" style="width:100%;box-sizing:border-box;background:var(--secondary-background-color,rgba(0,0,0,0.06));color:var(--primary-text-color);border:1px solid rgba(128,128,128,0.2);border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit;background-image:none;">
+            </div>
+            <div class="toggle-list" id="mm-family-list" style="max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+              <!-- populated by JS -->
+            </div>
+          </div>
+        </div>
+
         <!-- Map Settings -->
         <div>
           <div class="section-title">Map Settings</div>
@@ -1898,6 +2098,84 @@ class MeerkatMapCardEditor extends HTMLElement {
       </div>`;
 
     this._setupListeners();
+    this._buildFamilyList();
+  }
+
+  // ── Family member checklist ───────────────────────────────────────
+  _buildFamilyList(filter) {
+    const root     = this.shadowRoot;
+    const listEl   = root.getElementById('mm-family-list');
+    if (!listEl || !this._hass) return;
+
+    const cfg         = this._config || {};
+    const selected    = Array.isArray(cfg.family_members) ? cfg.family_members : [];
+    const mainEntity  = cfg.person_entity || '';
+
+    // Collect all entities with GPS coords, excluding the main tracked person
+    const candidates = Object.keys(this._hass.states)
+      .filter(e => {
+        if (e === mainEntity) return false;
+        const s = this._hass.states[e];
+        return s?.attributes?.latitude && s?.attributes?.longitude;
+      })
+      .sort((a, b) => {
+        const aS = selected.includes(a) ? 0 : 1;
+        const bS = selected.includes(b) ? 0 : 1;
+        if (aS !== bS) return aS - bS;
+        return a.localeCompare(b);
+      });
+
+    const q = (filter || '').toLowerCase();
+    const filtered = q
+      ? candidates.filter(e => {
+          const name = (this._hass.states[e]?.attributes?.friendly_name || '').toLowerCase();
+          return e.toLowerCase().includes(q) || name.includes(q);
+        })
+      : candidates;
+
+    const isDark   = (this._config?.theme || 'dark') !== 'light';
+    const subCol   = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)';
+
+    listEl.innerHTML = filtered.map((entityId, i) => {
+      const state      = this._hass.states[entityId];
+      const name       = state?.attributes?.friendly_name || entityId;
+      const picUrl     = state?.attributes?.entity_picture || '';
+      const isSelected = selected.includes(entityId);
+      const zone       = (state?.state || '').toLowerCase();
+      const zoneColor  = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : '#AF52DE';
+      const avatar     = picUrl
+        ? `<img src="${picUrl}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid ${zoneColor};flex-shrink:0;" alt="${name}">`
+        : `<div style="width:32px;height:32px;border-radius:50%;background:${zoneColor}22;border:2px solid ${zoneColor};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:${zoneColor};flex-shrink:0;">${(name[0]||'?').toUpperCase()}</div>`;
+
+      return `
+        <div class="toggle-item" style="${i > 0 ? 'border-top:1px solid rgba(128,128,128,0.1);' : ''}">
+          <div class="toggle-left" style="display:flex;align-items:center;gap:10px;flex:1;">
+            ${avatar}
+            <div style="flex:1;min-width:0;">
+              <div class="toggle-label" style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</div>
+              <div style="font-size:11px;color:${subCol};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entityId}</div>
+            </div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" data-family-entity="${entityId}" ${isSelected ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+          </label>
+        </div>`;
+    }).join('') || `<div style="padding:16px;text-align:center;font-size:13px;color:${subCol};">No person entities with GPS found</div>`;
+
+    // Wire up toggles
+    listEl.querySelectorAll('input[data-family-entity]').forEach(input => {
+      input.onchange = () => {
+        const id  = input.dataset.familyEntity;
+        let cur   = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
+        if (input.checked) {
+          if (!cur.includes(id)) cur.push(id);
+        } else {
+          cur = cur.filter(x => x !== id);
+        }
+        this._updateConfig('family_members', cur);
+      };
+    });
   }
 
   _setupListeners() {
@@ -1934,6 +2212,12 @@ class MeerkatMapCardEditor extends HTMLElement {
       }
     };
 
+    // Family member search filter
+    const familySearch = root.getElementById('mm-family-search');
+    if (familySearch) {
+      familySearch.oninput = () => this._buildFamilyList(familySearch.value);
+    }
+
     // Accent colour
     // accent_color removed
   }
@@ -1950,6 +2234,7 @@ class MeerkatMapCardEditor extends HTMLElement {
     if (el('zoom_level'))      el('zoom_level').value      = cfg.zoom_level      || 15;
     root.querySelectorAll('input[name="theme"]').forEach(r => r.checked = r.value === (cfg.theme || 'dark'));
     root.querySelectorAll('input[data-key]').forEach(r => r.checked = !!cfg[r.dataset.key]);
+    this._buildFamilyList();
   }
 
   _updateConfig(key, value) {
