@@ -792,7 +792,6 @@ class MeerkatMapCard extends HTMLElement {
       .mm-info-row:last-child { border-bottom:none; }
       .mm-info-label { font-size:12px;color:${subCol};font-weight:500; }
       .mm-info-value { font-size:13px;font-weight:600;color:${textCol};text-align:right;max-width:200px;word-break:break-word; }
-      .mm-zone-pill { display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.04em; }
     `;
     overlay.appendChild(style);
 
@@ -809,11 +808,7 @@ class MeerkatMapCard extends HTMLElement {
         ${picUrl ? `<img src="${picUrl}" style="width:100%;height:100%;object-fit:cover;" alt="${name}">` : `<span style="font-size:22px;font-weight:700;color:${zoneColor};">${(name[0]||'?').toUpperCase()}</span>`}
       </div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:4px;">${name}</div>
-        <span class="mm-zone-pill" style="background:${zoneColor}22;color:${zoneColor};border:1px solid ${zoneColor}44;">
-          <svg viewBox="0 0 24 24" width="11" height="11"><path d="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0,9.5c-1.38,0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5,1.12 2.5,2.5-1.12,2.5-2.5,2.5z" fill="${zoneColor}"/></svg>
-          ${zoneLabel}
-        </span>
+        <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">${name}</div>
       </div>
       <button id="mm-family-popup-close" style="background:${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)'};border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:${subCol};font-size:16px;flex-shrink:0;transition:background 0.15s;">✕</button>`;
 
@@ -1100,7 +1095,6 @@ class MeerkatMapCard extends HTMLElement {
       .mm-info-row:last-child { border-bottom:none; }
       .mm-info-label { font-size:12px;color:${subCol};font-weight:500; }
       .mm-info-value { font-size:13px;font-weight:600;color:${textCol};text-align:right;max-width:200px;word-break:break-word; }
-      .mm-zone-pill { display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.04em; }
     `;
     overlay.appendChild(style);
 
@@ -1118,11 +1112,7 @@ class MeerkatMapCard extends HTMLElement {
         ${picUrl ? `<img src="${picUrl}" style="width:100%;height:100%;object-fit:cover;" alt="${name}">` : `<span style="font-size:22px;font-weight:700;color:${zoneColor};">${(name[0]||'?').toUpperCase()}</span>`}
       </div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:4px;">${name}</div>
-        <span class="mm-zone-pill" style="background:${zoneColor}22;color:${zoneColor};border:1px solid ${zoneColor}44;">
-          <svg viewBox="0 0 24 24" width="11" height="11"><path d="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0,9.5c-1.38,0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5,1.12 2.5,2.5-1.12,2.5-2.5,2.5z" fill="${zoneColor}"/></svg>
-          ${zoneLabel}
-        </span>
+        <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">${name}</div>
       </div>
       <button id="mm-popup-close" style="background:${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)'};border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:${subCol};font-size:16px;flex-shrink:0;transition:background 0.15s;">✕</button>`;
 
@@ -1163,7 +1153,7 @@ class MeerkatMapCard extends HTMLElement {
 
       const sectionHead = document.createElement('div');
       sectionHead.style.cssText = `font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:${subCol};margin-bottom:10px;`;
-      sectionHead.textContent = 'Tracked Locations';
+      sectionHead.textContent = 'Sharing';
       familySection.appendChild(sectionHead);
 
       const memberRows = document.createElement('div');
@@ -2083,10 +2073,10 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
-        <!-- Tracked Locations -->
+        <!-- Sharing -->
         <div>
-          <div class="section-title">Tracked Locations</div>
-          <div class="hint" style="margin-bottom:6px;">Pin additional entities to the map — people, devices, zones or anything with GPS coordinates. Tap a tracked marker to see its current location, address and distance from you.</div>
+          <div class="section-title">Sharing</div>
+          <div class="hint" style="margin-bottom:6px;">Track people, devices or any entity with GPS coordinates. Tap a marker to see its current location, address and distance from you.</div>
           <div class="card-block">
             <div style="padding:10px 12px 0;">
               <input type="text" id="mm-family-search" placeholder="Filter entities…" style="width:100%;box-sizing:border-box;background:var(--secondary-background-color,rgba(0,0,0,0.06));color:var(--primary-text-color);border:1px solid rgba(128,128,128,0.2);border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit;background-image:none;">
