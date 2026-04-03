@@ -11,12 +11,12 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 ## Features
 
 - **Live person tracking** — animated pulsing marker, colour-coded by zone (green = home, orange = away)
-- **Person popup** — tap the marker to see last updated time, GPS accuracy, battery, speed, altitude, full address, and coordinates
+- **Person popup** — tap the marker to see last updated time, GPS accuracy, battery, full address, and coordinates
 - **Sharing** — track additional people, devices, or any GPS entity alongside yourself; each appears as its own marker with its current address and distance from you
 - **Points of interest** — 53 categories across 7 groups, fetched from OpenStreetMap via Overpass API
 - **Smart POI caching** — results cached for a configurable duration (default 48 hours); revisiting a location loads instantly from cache with no network request
 - **POI status ring** — always-visible indicator showing loading, success, and error states with a centre button to stop or refresh
-- **POI popup** — tap any POI to see name, category, address, distance from person, opening hours, phone (tappable to call), website (icon clickable), and more
+- **POI popup** — tap any POI to see name, category, address, distance from person, opening hours, phone (tappable to call), website (icon clickable), and any available extra details such as cuisine, wheelchair access, fees, operator, brand, and network
 - **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
 - **Dark / Light / Auto theme**
@@ -52,7 +52,7 @@ Click the button above, or:
 
 > ⚠️ **iPhone and iPad users:** The iOS Home Assistant companion app blocks direct requests to external APIs including the Overpass API used for POI data. Without the steps below, points of interest will not load on any iPhone or iPad that does not already have them cached.
 
-To fix this, install the **Home Assistant Web Proxy** integration. It routes Overpass requests through your HA server so the browser never touches external APIs directly. The card detects it automatically — no card configuration needed.
+To fix this, install the **Home Assistant Web Proxy** integration. It routes Overpass requests through your HA server so the browser never touches external APIs directly. The card always tries the proxy first on all platforms — if it is not installed or unreachable, the card falls back to direct connections automatically. No card configuration is needed.
 
 ### Step 1 — Install the proxy integration via HACS
 
@@ -63,7 +63,7 @@ To fix this, install the **Home Assistant Web Proxy** integration. It routes Ove
 
 ### Step 2 — Add the Overpass URL patterns
 
-The card races three Overpass mirrors simultaneously and uses whichever responds first. Add all three for the fastest possible load times:
+The card races all three Overpass mirrors simultaneously through the proxy and uses whichever responds first. Add all three for the fastest possible load times:
 
 1. Settings → Devices & Services → find **Home Assistant Web Proxy** → **Configure**
 1. Click **+ ADD** and enter `https://overpass-api.de/*`
@@ -71,7 +71,7 @@ The card races three Overpass mirrors simultaneously and uses whichever responds
 1. Click **+ ADD** again and enter `https://maps.mail.ru/*`
 1. Click **Save**
 
-No restart needed after step 2. The card automatically uses the proxy on iOS and falls back to direct connections on desktop.
+No restart needed after step 2.
 
 > **Why three mirrors?** Each is an independent Overpass server in a different location. Racing them simultaneously means the card always uses whichever is fastest at that moment.
 
@@ -124,7 +124,7 @@ The **Sharing** section in the visual editor lets you add any Home Assistant ent
 Each tracked entity appears as a pulsing circular marker, colour-coded by zone status (green = home, orange = away). Tap any marker to see a popup with:
 
 - Last updated time
-- GPS accuracy, battery, speed, and altitude (where available)
+- GPS accuracy and battery (where available)
 - Distance from you
 - Current reverse-geocoded address
 - Coordinates
@@ -194,7 +194,22 @@ The visual editor includes a **Cache Settings** section with two options:
 
 ## Person Popup
 
-Tap the person marker to see last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address. If you have any entities configured in **Sharing**, a section at the bottom lists each one with its current address and distance from you — tap any row to fly the map to their location.
+Tap the person marker to see last updated time, GPS accuracy, battery, coordinates, and full address. If you have any entities configured in **Sharing**, a section at the bottom lists each one with its current address and distance from you — tap any row to fly the map to their location.
+
+-----
+
+## POI Popup
+
+Tap any POI marker to open a popup showing all available information from OpenStreetMap, including:
+
+- Name and category
+- Address
+- Distance from the tracked person
+- Opening hours
+- Phone number (tap to call)
+- Website (tap the icon in the header to open)
+- Cuisine type, wheelchair access, fees, operator, brand, network, and reference where available
+- Coordinates
 
 -----
 
