@@ -1002,11 +1002,15 @@ class MeerkatMapCard extends HTMLElement {
     const s = state?.state || 'unknown';
     if (s === 'home') return 'Home';
     if (s === 'not_home') return 'Away';
-    // Find matching zone entity
+    // Match against zone entity ID slug: zone.work → "work"
     const zones = Object.entries(this._hass?.states || {})
-      .filter(([k]) => k.startsWith('zone.'))
-      .find(([, v]) => v.state === state.state || v.attributes?.friendly_name?.toLowerCase() === s.toLowerCase());
-    if (zones) return zones[1].attributes?.friendly_name || s;
+      .filter(([k]) => k.startsWith('zone.'));
+    const match = zones.find(([k, v]) => {
+      const slug = k.replace('zone.', '').replace(/_/g, ' ');
+      return slug.toLowerCase() === s.toLowerCase()
+        || (v.attributes?.friendly_name || '').toLowerCase() === s.toLowerCase();
+    });
+    if (match) return match[1].attributes?.friendly_name || s;
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
@@ -1580,7 +1584,11 @@ class MeerkatMapCard extends HTMLElement {
         const snapshot = Object.assign({}, el, { _lat: lat, _lon: lon });
         const m = L.marker([lat, lon], { icon: poiIcon });
         m.on('click', (ev) => {
-          ev.originalEvent?.stopPropagation?.();
+          if (ev.originalEvent) {
+            ev.originalEvent.stopPropagation();
+            ev.originalEvent.preventDefault();
+          }
+          window.L.DomEvent.stopPropagation(ev);
           this._openPOIPopup(cat, snapshot);
         });
         return m;
@@ -1604,7 +1612,14 @@ class MeerkatMapCard extends HTMLElement {
     this._closeAllOverlays();
     const isDark  = this._isDark();
     const tags    = el.tags || {};
-    const name    = tags.name || tags.brand || cat.label;
+
+    // Re-derive the best matching category from this element's actual tags.
+    // The layer that rendered the marker may have been assigned via a broad
+    // batch bucket (e.g. "Shops") when a more specific one (e.g. "Bakeries")
+    // was not in the same batch — causing the pill to show the wrong label.
+    const bestCat = MM_POIS.find(c => _mmCatMatches(c, tags)) || cat;
+
+    const name    = tags.name || tags.brand || bestCat.label;
     const bgBase  = isDark ? '28,28,30' : '252,252,254';
     const popupBg = isDark ? `rgba(${bgBase},0.94)` : `rgba(${bgBase},0.96)`;
     const textCol = isDark ? '#fff' : '#000';
@@ -1622,7 +1637,7 @@ class MeerkatMapCard extends HTMLElement {
       .mm-info-row:last-child { border-bottom:none; }
       .mm-info-label { font-size:12px;color:${subCol};font-weight:500;flex-shrink:0;margin-right:12px; }
       .mm-info-value { font-size:13px;font-weight:600;color:${textCol};text-align:right;word-break:break-word; }
-      .mm-info-link { font-size:13px;font-weight:600;color:${cat.color};text-align:right;text-decoration:none; }
+      .mm-info-link { font-size:13px;font-weight:600;color:${bestCat.color};text-align:right;text-decoration:none; }
     `;
     overlay.appendChild(style);
 
@@ -1638,17 +1653,17 @@ class MeerkatMapCard extends HTMLElement {
     const website = tags.website || tags['contact:website'] || '';
     const phone   = tags.phone   || tags['contact:phone']   || '';
     const iconEl  = website
-      ? `<a href="${website}" target="_blank" rel="noopener" title="Open website" style="width:50px;height:50px;border-radius:14px;background:${cat.color}22;border:2px solid ${cat.color}44;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;text-decoration:none;">
-           <svg viewBox="0 0 24 24" width="24" height="24"><path d="${cat.icon}" fill="${cat.color}"/></svg>
+      ? `<a href="${website}" target="_blank" rel="noopener" title="Open website" style="width:50px;height:50px;border-radius:14px;background:${bestCat.color}22;border:2px solid ${bestCat.color}44;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;text-decoration:none;">
+           <svg viewBox="0 0 24 24" width="24" height="24"><path d="${bestCat.icon}" fill="${bestCat.color}"/></svg>
          </a>`
-      : `<div style="width:50px;height:50px;border-radius:14px;background:${cat.color}22;border:2px solid ${cat.color}44;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-           <svg viewBox="0 0 24 24" width="24" height="24"><path d="${cat.icon}" fill="${cat.color}"/></svg>
+      : `<div style="width:50px;height:50px;border-radius:14px;background:${bestCat.color}22;border:2px solid ${bestCat.color}44;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+           <svg viewBox="0 0 24 24" width="24" height="24"><path d="${bestCat.icon}" fill="${bestCat.color}"/></svg>
          </div>`;
     header.innerHTML = `
       ${iconEl}
       <div style="flex:1;min-width:0;">
         <div style="font-size:17px;font-weight:700;letter-spacing:-0.2px;">${name}</div>
-        <div style="font-size:12px;color:${subCol};margin-top:2px;">${cat.label}</div>
+        <div style="font-size:12px;color:${subCol};margin-top:2px;">${bestCat.label}</div>
       </div>
       <button id="mm-poi-close" style="background:${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)'};border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:${subCol};font-size:16px;flex-shrink:0;">✕</button>`;
 
@@ -1686,7 +1701,7 @@ class MeerkatMapCard extends HTMLElement {
       const phoneRow = document.createElement('div');
       phoneRow.className = 'mm-info-row';
       phoneRow.innerHTML = `<span class="mm-info-label">Phone</span>`
-        + `<span class="mm-info-value"><a href="tel:${phone}" style="color:${cat.color};text-decoration:none;font-weight:600;" onclick="event.preventDefault();if(confirm('Call ${phone}?'))window.location.href='tel:${phone}'">${phone}</a></span>`;
+        + `<span class="mm-info-value"><a href="tel:${phone}" style="color:${bestCat.color};text-decoration:none;font-weight:600;" onclick="event.preventDefault();if(confirm('Call ${phone}?'))window.location.href='tel:${phone}'">${phone}</a></span>`;
       infoWrap.appendChild(phoneRow);
     }
     if (tags.website || tags['contact:website']) addRow('Website', tags.website || tags['contact:website'], true);
