@@ -1573,11 +1573,15 @@ class MeerkatMapCard extends HTMLElement {
         var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
         var lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
         if (lat == null || lon == null) return null;
-        el._lat = lat; el._lon = lon; // store for distance calc
+        // Snapshot: create a per-marker copy so each click closure is bound to its
+        // own immutable object. Without this, mutating el._lat/_lon on the shared
+        // cache object causes every marker in the layer to report the same (last-
+        // written) coordinates when clicked.
+        const snapshot = Object.assign({}, el, { _lat: lat, _lon: lon });
         const m = L.marker([lat, lon], { icon: poiIcon });
         m.on('click', (ev) => {
           ev.originalEvent?.stopPropagation?.();
-          this._openPOIPopup(cat, el);
+          this._openPOIPopup(cat, snapshot);
         });
         return m;
       });
