@@ -4,7 +4,7 @@ Track a person entity on a live OpenStreetMap with an animated pulsing marker, p
 
 ## Person tracking
 
-The person marker is colour-coded by zone — green when home, orange when away. Tap it to open a popup showing last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address.
+The person marker is colour-coded by zone — green when home, orange when away. Tap it to open a popup showing last updated time, GPS accuracy, battery, coordinates, and full address.
 
 ## Sharing
 
@@ -12,7 +12,7 @@ Add any entity with GPS coordinates to the map alongside yourself — people, de
 
 Tap your own marker to see a **Sharing** section listing all tracked entities with their current address and distance from you. Tap any row to close the popup and fly the map directly to that entity's location.
 
-Tap a tracked entity's marker directly to see its own popup with last updated time, GPS accuracy, battery, speed, altitude, distance from you, coordinates, and a reverse-geocoded address.
+Tap a tracked entity's marker directly to see its own popup with last updated time, GPS accuracy, battery, distance from you, coordinates, and a reverse-geocoded address.
 
 Configure shared entities in the **Sharing** section of the visual editor — it lists all entities with GPS coordinates and lets you toggle them on with a search filter to find them quickly.
 
@@ -28,7 +28,7 @@ Tap the map pin button in the top-right controls to open a bottom sheet where yo
 
 **Enabled by default:** Train Stations, Bus Stops, Hospitals, Pharmacies, Supermarkets.
 
-Tap any POI marker to see its name, category, address, opening hours, phone (tap to call), website, and distance from the tracked person.
+Tap any POI marker to see its name, category, address, opening hours, phone (tap to call), website, distance from the tracked person, and any available extra details such as cuisine, wheelchair access, fees, operator, brand, network, and coordinates.
 
 ## POI status ring
 
@@ -42,7 +42,7 @@ The iOS companion app blocks direct requests to external APIs, which prevents po
 - `https://overpass.kumi.systems/*`
 - `https://maps.mail.ru/*`
 
-The card races all three mirrors simultaneously and uses whichever responds first. No card configuration is needed — it detects the proxy automatically.
+The card always tries the proxy first — it routes requests through your HA server, making them same-origin and safe on iOS. If the proxy is not installed or unreachable, the card falls back to direct connections automatically. No card configuration is needed.
 
 See the [README](README.md) for full setup steps.
 
