@@ -1,6 +1,6 @@
 # Meerkat Map Card
 
-A custom Home Assistant Lovelace card that tracks a person entity on a live OpenStreetMap with an animated location marker, address lookups, and distance calculations.
+A custom Home Assistant Lovelace card that tracks a person entity on a live OpenStreetMap with an animated location marker, address lookups, distance calculations, and shared location tracking for people and devices.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
@@ -11,11 +11,12 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 ## Features
 
 - **Live person tracking** — animated pulsing marker, colour-coded by zone (green = home, orange = away)
-- **Person popup** — tap the marker to see zone, last updated, GPS accuracy, battery, speed, altitude, full address, and coordinates
+- **Person popup** — tap the marker to see last updated time, GPS accuracy, battery, speed, altitude, full address, and coordinates
+- **Sharing** — track additional people, devices, or any GPS entity alongside yourself; each appears as its own marker with its current address and distance from you
 - **Points of interest** — 53 categories across 7 groups, fetched from OpenStreetMap via Overpass API
 - **Smart POI caching** — results cached for a configurable duration (default 48 hours); revisiting a location loads instantly from cache with no network request
 - **POI status ring** — always-visible indicator showing loading, success, and error states with a centre button to stop or refresh
-- **POI popup** — tap any POI to see name, address, distance from person, opening hours, phone (tappable to call), website (icon clickable), and more
+- **POI popup** — tap any POI to see name, category, address, distance from person, opening hours, phone (tappable to call), website (icon clickable), and more
 - **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
 - **Dark / Light / Auto theme**
@@ -41,8 +42,8 @@ Click the button above, or:
 1. Download `meerkat-map-card.js` from this repository
 1. Copy it to `/config/www/meerkat-map-card.js`
 1. In Home Assistant → Settings → Dashboards → Resources, add:
-- URL: `/local/meerkat-map-card.js`
-- Type: JavaScript module
+   - URL: `/local/meerkat-map-card.js`
+   - Type: JavaScript module
 1. Refresh your browser
 
 -----
@@ -84,6 +85,9 @@ The card has a full visual editor — click the pencil icon after adding it to a
 type: custom:meerkat-map-card
 person_entity: person.sarah
 geocoded_entity: sensor.sarahs_iphone_geocoded_location
+family_members:
+  - person.james
+  - device_tracker.sarahs_car
 theme: dark
 map_height: 420
 zoom_level: 15
@@ -98,17 +102,36 @@ show_supermarkets: true
 
 ### Options
 
-|Option           |Type  |Default |Description                                                                           |
-|-----------------|------|--------|--------------------------------------------------------------------------------------|
-|`person_entity`  |string|—       |Entity ID of the person or device tracker to display                                  |
-|`geocoded_entity`|string|—       |Optional. HA companion app geocoded location sensor for full address inc. house number|
-|`theme`          |string|`dark`  |Map colour scheme: `dark`, `light`, or `auto`                                         |
-|`map_height`     |number|`420`   |Height of the map in pixels                                                           |
-|`zoom_level`     |number|`15`    |Default zoom level (1–20)                                                             |
-|`distance_unit`  |string|`metric`|Distance units: `metric` (km/m), `mixed` (mi/m), or `imperial` (mi/yd)                |
-|`cache_ttl_hours`|number|`48`    |How long POI data is cached before a refresh is needed (hours)                        |
+| Option            | Type         | Default  | Description                                                                            |
+|-------------------|--------------|----------|----------------------------------------------------------------------------------------|
+| `person_entity`   | string       | —        | Entity ID of the person or device tracker to display                                   |
+| `geocoded_entity` | string       | —        | Optional. HA companion app geocoded location sensor for full address inc. house number |
+| `family_members`  | list         | `[]`     | Additional entities to show on the map — people, device trackers, or anything with GPS |
+| `theme`           | string       | `dark`   | Map colour scheme: `dark`, `light`, or `auto`                                          |
+| `map_height`      | number       | `420`    | Height of the map in pixels                                                            |
+| `zoom_level`      | number       | `15`     | Default zoom level (1–20)                                                              |
+| `distance_unit`   | string       | `metric` | Distance units: `metric` (km/m), `mixed` (mi/m), or `imperial` (mi/yd)                |
+| `cache_ttl_hours` | number       | `48`     | How long POI data is cached before a refresh is needed (hours)                         |
 
 For a full list of the 53 POI `show_*` keys, see the visual editor.
+
+-----
+
+## Sharing
+
+The **Sharing** section in the visual editor lets you add any Home Assistant entity with GPS coordinates to the map alongside yourself — family members, friends, device trackers, vehicles, or anything else HA can locate.
+
+Each tracked entity appears as a pulsing circular marker, colour-coded by zone status (green = home, orange = away). Tap any marker to see a popup with:
+
+- Last updated time
+- GPS accuracy, battery, speed, and altitude (where available)
+- Distance from you
+- Current reverse-geocoded address
+- Coordinates
+
+Tap your **own** marker to see a **Sharing** section at the bottom of your popup, listing all tracked entities with their current address and distance from you. Tap any row to close the popup and fly the map to that entity's location.
+
+In the editor, the Sharing list shows all entities with GPS coordinates, with a search bar to filter by name or entity ID. Selected entities appear at the top of the list.
 
 -----
 
@@ -148,12 +171,12 @@ The 53 categories are organised into 7 groups in the visual editor:
 
 A small ring in the bottom-left corner of the map shows the current state of POI data loading:
 
-|State      |Colour             |Meaning                                      |
-|-----------|-------------------|---------------------------------------------|
-|**Idle**   |White              |Data loaded and up to date                   |
-|**Loading**|Yellow, breathing  |Fetching data from Overpass                  |
-|**Success**|Green, pulsing     |Data loaded successfully                     |
-|**Error**  |Red, fades to white|Fetch failed — tap the centre button to retry|
+| State       | Colour             | Meaning                                       |
+|-------------|--------------------|-----------------------------------------------|
+| **Idle**    | White              | Data loaded and up to date                    |
+| **Loading** | Yellow, breathing  | Fetching data from Overpass                   |
+| **Success** | Green, pulsing     | Data loaded successfully                      |
+| **Error**   | Red, fades to white| Fetch failed — tap the centre button to retry |
 
 The centre button changes depending on state — a stop icon while loading, a refresh icon otherwise. Tapping the refresh button shows a confirmation prompt before clearing the cache and reloading.
 
@@ -171,7 +194,7 @@ The visual editor includes a **Cache Settings** section with two options:
 
 ## Person Popup
 
-Tap the person marker to see zone name, last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address.
+Tap the person marker to see last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address. If you have any entities configured in **Sharing**, a section at the bottom lists each one with its current address and distance from you — tap any row to fly the map to their location.
 
 -----
 
@@ -179,7 +202,7 @@ Tap the person marker to see zone name, last updated time, GPS accuracy, battery
 
 The `geocoded_entity` option is the most reliable way to display a full address including the house number. The HA companion app (iOS and Android) creates this sensor automatically when location permissions are granted — it usually appears as `sensor.<your_name>_geocoded_location`.
 
-Without this option the card falls back to [Nominatim](https://nominatim.openstreetmap.org/) reverse geocoding, which may omit the house number for some residential addresses.
+Without this option the card falls back to [Nominatim](https://nominatim.openstreetmap.org/) reverse geocoding, which may omit the house number for some residential addresses. Nominatim is always used for entities in the Sharing list, since the geocoded sensor only knows your own location.
 
 -----
 
@@ -188,7 +211,7 @@ Without this option the card falls back to [Nominatim](https://nominatim.openstr
 - Map tiles are loaded from [CARTO](https://carto.com/) (OpenStreetMap data)
 - POI data is fetched from the [Overpass API](https://overpass-api.de/) and two public mirrors — only the visible map bounding box is sent, no personal data
 - Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
-- POI results are cached in your browser’s `localStorage` only — nothing is sent to any third party beyond the API calls above
+- POI results are cached in your browser's `localStorage` only — nothing is sent to any third party beyond the API calls above
 - No analytics, no accounts, no tracking
 
 -----
