@@ -1,10 +1,20 @@
 # Meerkat Map Card
 
-Track a person entity on a live OpenStreetMap with an animated pulsing marker, points of interest, distance calculations, and full address lookup — all from a single Lovelace card.
+Track a person entity on a live OpenStreetMap with an animated pulsing marker, points of interest, distance calculations, full address lookup, and shared location tracking — all from a single Lovelace card.
 
 ## Person tracking
 
-The person marker is colour-coded by zone — green when home, orange when away. Tap it to open a popup showing zone name, last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address.
+The person marker is colour-coded by zone — green when home, orange when away. Tap it to open a popup showing last updated time, GPS accuracy, battery, speed, altitude, coordinates, and full address.
+
+## Sharing
+
+Add any entity with GPS coordinates to the map alongside yourself — people, device trackers, phones, cars, or anything else Home Assistant can locate. Each shared entity appears as its own pulsing marker, colour-coded by zone status.
+
+Tap your own marker to see a **Sharing** section listing all tracked entities with their current address and distance from you. Tap any row to close the popup and fly the map directly to that entity's location.
+
+Tap a tracked entity's marker directly to see its own popup with last updated time, GPS accuracy, battery, speed, altitude, distance from you, coordinates, and a reverse-geocoded address.
+
+Configure shared entities in the **Sharing** section of the visual editor — it lists all entities with GPS coordinates and lets you toggle them on with a search filter to find them quickly.
 
 ## POI quick-select
 
@@ -18,7 +28,7 @@ Tap the map pin button in the top-right controls to open a bottom sheet where yo
 
 **Enabled by default:** Train Stations, Bus Stops, Hospitals, Pharmacies, Supermarkets.
 
-Tap any POI marker to see its name, address, opening hours, phone (tap to call), website, and distance from the tracked person.
+Tap any POI marker to see its name, category, address, opening hours, phone (tap to call), website, and distance from the tracked person.
 
 ## POI status ring
 
@@ -48,6 +58,7 @@ The visual editor includes a Cache Settings section where you can:
 All settings are configurable through the built-in visual editor — no YAML required. Options include:
 
 - Person entity and geocoded location sensor
+- Sharing — add people, devices or any GPS entity to track alongside yourself
 - Map height and default zoom level
 - Dark / Light / Auto theme
 - Distance units (km/m, mi/m, or mi/yd)
