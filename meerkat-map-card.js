@@ -182,7 +182,6 @@ class MeerkatMapCard extends HTMLElement {
     this._tileLayer   = null;
     this._personMarker = null;
     this._familyMarkers = {};   // entityId → Leaflet marker
-    this._familyLines   = {};   // entityId → Leaflet polyline
     this._poiLayers   = {};
     this._geocodeCache = {};
     this._activeOverlay = null;
@@ -317,7 +316,6 @@ class MeerkatMapCard extends HTMLElement {
       this._tileLayer    = null;
       this._personMarker = null;  // must null so re-init creates a fresh marker
       this._familyMarkers = {};
-      this._familyLines   = {};
       this._poiLayers    = {};
       this._poiFetching  = {};
     }
@@ -714,14 +712,8 @@ class MeerkatMapCard extends HTMLElement {
       if (!currentIds.has(id)) {
         this._map.removeLayer(this._familyMarkers[id]);
         delete this._familyMarkers[id];
-        if (this._familyLines[id]) { this._map.removeLayer(this._familyLines[id]); delete this._familyLines[id]; }
       }
     }
-
-    const mainState = this._hass.states[this._config?.person_entity];
-    const mainLat   = parseFloat(mainState?.attributes?.latitude);
-    const mainLng   = parseFloat(mainState?.attributes?.longitude);
-    const hasMainPos = !isNaN(mainLat) && !isNaN(mainLng);
 
     for (const entityId of members) {
       const state = this._hass.states[entityId];
@@ -763,16 +755,6 @@ class MeerkatMapCard extends HTMLElement {
       }
       this._familyMarkers[entityId].off('click');
       this._familyMarkers[entityId].on('click', () => this._openFamilyMemberPopup(state, lat, lng));
-
-      // Dashed line from main person to family member
-      if (hasMainPos) {
-        const lineOpts = { color: zoneColor, weight: 2, opacity: 0.45, dashArray: '5, 9' };
-        if (this._familyLines[entityId]) {
-          this._familyLines[entityId].setLatLngs([[mainLat, mainLng], [lat, lng]]).setStyle(lineOpts);
-        } else {
-          this._familyLines[entityId] = L.polyline([[mainLat, mainLng], [lat, lng]], lineOpts).addTo(this._map);
-        }
-      }
     }
   }
 
@@ -1177,7 +1159,7 @@ class MeerkatMapCard extends HTMLElement {
 
       const sectionHead = document.createElement('div');
       sectionHead.style.cssText = `font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:${subCol};margin-bottom:10px;`;
-      sectionHead.textContent = 'Family';
+      sectionHead.textContent = 'Tracked Locations';
       familySection.appendChild(sectionHead);
 
       const memberRows = document.createElement('div');
@@ -2082,13 +2064,13 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
-        <!-- Family Members -->
+        <!-- Tracked Locations -->
         <div>
-          <div class="section-title">Family Members</div>
-          <div class="hint" style="margin-bottom:6px;">Track other people on the map — like Apple FindMy. Click their marker to see location details and distance from you.</div>
+          <div class="section-title">Tracked Locations</div>
+          <div class="hint" style="margin-bottom:6px;">Pin additional entities to the map — people, devices, zones or anything with GPS coordinates. Tap a tracked marker to see its current location, address and distance from you.</div>
           <div class="card-block">
             <div style="padding:10px 12px 0;">
-              <input type="text" id="mm-family-search" placeholder="Filter people…" style="width:100%;box-sizing:border-box;background:var(--secondary-background-color,rgba(0,0,0,0.06));color:var(--primary-text-color);border:1px solid rgba(128,128,128,0.2);border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit;background-image:none;">
+              <input type="text" id="mm-family-search" placeholder="Filter entities…" style="width:100%;box-sizing:border-box;background:var(--secondary-background-color,rgba(0,0,0,0.06));color:var(--primary-text-color);border:1px solid rgba(128,128,128,0.2);border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit;background-image:none;">
             </div>
             <div class="toggle-list" id="mm-family-list" style="max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;">
               <!-- populated by JS -->
@@ -2247,7 +2229,7 @@ class MeerkatMapCardEditor extends HTMLElement {
             <span class="toggle-track"></span>
           </label>
         </div>`;
-    }).join('') || `<div style="padding:16px;text-align:center;font-size:13px;color:${subCol};">No person entities with GPS found</div>`;
+    }).join('') || `<div style="padding:16px;text-align:center;font-size:13px;color:${subCol};">No entities with GPS coordinates found</div>`;
 
     // Wire up toggles
     listEl.querySelectorAll('input[data-family-entity]').forEach(input => {
