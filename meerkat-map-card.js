@@ -770,10 +770,13 @@ class MeerkatMapCard extends HTMLElement {
     const picUrl    = state.attributes?.entity_picture || '';
     const lastChanged = state.last_changed || state.last_updated;
     const timeAgo   = _mmTimeAgo(lastChanged);
-    const battery   = state.attributes?.battery_level ?? state.attributes?.battery ?? null;
+    const sourceState = (() => {
+      const src = state.attributes?.source;
+      return src ? this._hass?.states[src] : null;
+    })();
+    const battery   = state.attributes?.battery_level ?? state.attributes?.battery
+                   ?? sourceState?.attributes?.battery_level ?? sourceState?.attributes?.battery ?? null;
     const accuracy  = state.attributes?.gps_accuracy ?? null;
-    const speed     = state.attributes?.speed ?? null;
-    const altitude  = state.attributes?.altitude ?? null;
 
     const bgBase    = isDark ? '28,28,30' : '252,252,254';
     const popupBg   = isDark ? `rgba(${bgBase},0.94)` : `rgba(${bgBase},0.96)`;
@@ -823,8 +826,6 @@ class MeerkatMapCard extends HTMLElement {
     addRow('Last updated', timeAgo);
     if (accuracy !== null) addRow('GPS accuracy', `±${Math.round(accuracy)} m`);
     if (battery   !== null) addRow('Battery', `${Math.round(battery)}%`);
-    if (speed     !== null) addRow('Speed', `${Math.round(speed * 3.6)} km/h`);
-    if (altitude  !== null) addRow('Altitude', `${Math.round(altitude)} m`);
 
     // Distance from main person
     const mainState = this._hass?.states[this._config?.person_entity];
@@ -1073,10 +1074,13 @@ class MeerkatMapCard extends HTMLElement {
     const picUrl   = state.attributes?.entity_picture || '';
     const lastChanged = state.last_changed || state.last_updated;
     const timeAgo  = _mmTimeAgo(lastChanged);
-    const battery  = state.attributes?.battery_level ?? state.attributes?.battery ?? null;
+    const sourceState = (() => {
+      const src = state.attributes?.source;
+      return src ? this._hass?.states[src] : null;
+    })();
+    const battery  = state.attributes?.battery_level ?? state.attributes?.battery
+                  ?? sourceState?.attributes?.battery_level ?? sourceState?.attributes?.battery ?? null;
     const accuracy = state.attributes?.gps_accuracy ?? null;
-    const speed    = state.attributes?.speed ?? null;
-    const altitude = state.attributes?.altitude ?? null;
 
     const bgBase   = isDark ? '28,28,30' : '252,252,254';
     const popupBg  = isDark ? `rgba(${bgBase},0.94)` : `rgba(${bgBase},0.96)`;
@@ -1128,8 +1132,6 @@ class MeerkatMapCard extends HTMLElement {
     addRow('Last updated', timeAgo);
     if (accuracy !== null) addRow('GPS accuracy', `±${Math.round(accuracy)} m`);
     if (battery   !== null) addRow('Battery', `${Math.round(battery)}%`);
-    if (speed     !== null) addRow('Speed', `${Math.round(speed * 3.6)} km/h`);
-    if (altitude  !== null) addRow('Altitude', `${Math.round(altitude)} m`);
     addRow('Coordinates', `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
 
     // Geocode placeholder
