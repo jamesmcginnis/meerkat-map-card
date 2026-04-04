@@ -1443,30 +1443,24 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // Find the best overlapping cache entry for this category ─────────
-  // Uses a viewport-overlap check rather than a centre-within check so that
-  // panning slightly outside a previously fetched area still hits the cache.
   _poiCacheFallback(cat, s, w, n, e) {
     try {
       const prefix = `mmPOI:${cat.key}:`;
-      let bestTs = 0, bestElements = null;
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith(prefix)) continue;
         const parts = k.slice(prefix.length).split(',');
         if (parts.length !== 4) continue;
         const [cs, cw, cn, ce] = parts.map(Number);
-        // Accept any cache entry whose bounds overlap with the current viewport
-        if (s <= cn && n >= cs && w <= ce && e >= cw) {
+        const midLat = (s + n) / 2, midLng = (w + e) / 2;
+        if (midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce) {
           const raw = localStorage.getItem(k);
           if (raw) {
             const { ts, elements } = JSON.parse(raw);
-            if (Date.now() - ts < this._cacheTTL && ts > bestTs) {
-              bestTs = ts; bestElements = elements;
-            }
+            if (Date.now() - ts < this._cacheTTL) return elements;
           }
         }
       }
-      return bestElements;
     } catch (_) {}
     return null;
   }
