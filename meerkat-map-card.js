@@ -619,8 +619,7 @@ class MeerkatMapCard extends HTMLElement {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
 
-        // Restore in-memory POI elements from localStorage if present.
-        // localStorage survives full app close/reopen; sessionStorage does not.
+        // Restore legacy snapshot (bounds only — position is always person-centred)
         if (!this._poiElements || Object.keys(this._poiElements).length === 0) {
           try {
             const savedEls    = localStorage.getItem('mmPOIElements');
@@ -630,25 +629,23 @@ class MeerkatMapCard extends HTMLElement {
           } catch (_) {}
         }
 
-        // Re-render POI layers from in-memory cache immediately
+        // Re-render POI layers from the global accumulator immediately.
+        // _restorePOIsFromCache loads mmPOIAll: keys into _poiAllElements and
+        // renders them — this is the primary path after a full app close/reopen.
         this._restorePOIsFromCache();
-        // Only prefetch if we have no in-memory data (first load or forced refresh)
-        // — avoids any network activity on navigate-away/return
-        // Only treat in-memory data as "present" if it was captured at this location
-        const eb = this._poiElementsBounds;
-        const mapB = this._map.getBounds();
-        const midLat = (mapB.getSouth() + mapB.getNorth()) / 2;
-        const midLng = (mapB.getWest()  + mapB.getEast())  / 2;
-        const memValid = eb && this._poiElements &&
-          Object.keys(this._poiElements).length > 0 &&
-          midLat >= eb.s && midLat <= eb.n &&
-          midLng >= eb.w && midLng <= eb.e;
-        if (!memValid) {
-          // No valid in-memory data — do a full prefetch (may need network)
+
+        // Only trigger a network prefetch if the accumulator has NO data yet
+        // for at least one enabled category. If all categories are covered by
+        // the accumulator the user sees markers immediately with no spinner.
+        const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+        const allCoveredByAccumulator = enabled.length === 0 || enabled.every(cat =>
+          this._poiAllElements &&
+          this._poiAllElements[cat.key] &&
+          Object.keys(this._poiAllElements[cat.key]).length > 0
+        );
+        if (!allCoveredByAccumulator) {
           setTimeout(() => this._prefetchPOIs(), 600);
         }
-        // If memValid: _restorePOIsFromCache already rendered everything from
-        // memory above — no prefetch needed, no ring, no network request
       });
 
     } catch (e) {
@@ -669,20 +666,19 @@ class MeerkatMapCard extends HTMLElement {
     const lng = parseFloat(state.attributes?.longitude);
     if (isNaN(lat) || isNaN(lng)) return;
 
-    // On first load: restore last saved position if available,
-    // otherwise centre on the person
+    // Always centre on the person's current location — never restore the last
+    // map position. This ensures the card opens where the person actually is.
+    // We do restore _lastFetchBounds so that panning back to a previously
+    // visited area won't trigger a redundant network fetch.
     if (!this._mapCentredOnce) {
-      let restored = false;
       try {
         const saved = localStorage.getItem('mmMapPos');
         if (saved) {
-          const { lat: sLat, lng: sLng, zoom: sZoom, bounds } = JSON.parse(saved);
-          this._map.setView([sLat, sLng], sZoom);
+          const { bounds } = JSON.parse(saved);
           if (bounds) this._lastFetchBounds = bounds;
-          restored = true;
         }
       } catch (_) {}
-      if (!restored) this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
+      this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
       this._mapCentredOnce = true;
     }
 
@@ -1638,16 +1634,39 @@ class MeerkatMapCard extends HTMLElement {
       this._poiRingEnd(gen, true); // failed
     };
 
-    this._fetchOverpass(encodedQ, signal).then(finish).catch(() => {
+    this._fetchOverpass(encodedQ, signal).then(finish).catch(err => {
       if (signal?.aborted) { fail(); return; }
-      // Auto-retry once after 3 seconds — catches Overpass rate limiting
-      // where a second batch fired immediately after the first gets rejected.
-      // The ring stays in 'loading' state while we wait.
+
+      // Inspect all individual errors from AggregateError (Promise.any rejection)
+      // or the single error from a direct throw.
+      const errs = err?.errors || [err];
+      const codes = errs.map(e => e?.code).filter(Boolean);
+
+      if (codes.includes('rate_limit')) {
+        const retryAfter = errs.find(e => e?.retryAfter)?.retryAfter || 60;
+        this._showAPIInfoSheet('rate_limit', retryAfter);
+        fail(); return;
+      }
+      if (codes.includes('busy') || codes.every(c => c === 'timeout')) {
+        this._showAPIInfoSheet('busy');
+        fail(); return;
+      }
+
+      // Unknown error — auto-retry once after 3 seconds (catches transient failures)
       setTimeout(() => {
         if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
-        // Reset in-flight flags so the retry isn't blocked by the previous attempt
         toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
-        this._fetchOverpass(encodedQ, signal).then(finish).catch(() => fail());
+        this._fetchOverpass(encodedQ, signal).then(finish).catch(retryErr => {
+          if (signal?.aborted) { fail(); return; }
+          const retryCodes = (retryErr?.errors || [retryErr]).map(e => e?.code).filter(Boolean);
+          if (retryCodes.includes('rate_limit')) {
+            const retryAfter = (retryErr?.errors || [retryErr]).find(e => e?.retryAfter)?.retryAfter || 60;
+            this._showAPIInfoSheet('rate_limit', retryAfter);
+          } else if (retryCodes.includes('busy') || retryCodes.every(c => c === 'timeout')) {
+            this._showAPIInfoSheet('busy');
+          }
+          fail();
+        });
       }, 3000);
     });
   }
@@ -1661,13 +1680,25 @@ class MeerkatMapCard extends HTMLElement {
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
     ];
     const tryFetch = url => {
-      const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 20000)
-      );
+      const timeout = new Promise((_, reject) => {
+        setTimeout(() => {
+          const e = new Error('timeout'); e.code = 'timeout'; reject(e);
+        }, 20000);
+      });
       return Promise.race([
         fetch(url, opts)
-          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-          .then(d => d.elements || []),
+          .then(r => {
+            if (r.status === 429) {
+              const e = new Error('rate_limit'); e.code = 'rate_limit';
+              e.retryAfter = parseInt(r.headers.get('Retry-After') || '60');
+              throw e;
+            }
+            if (r.status === 503 || r.status === 504) {
+              const e = new Error('busy'); e.code = 'busy'; throw e;
+            }
+            if (!r.ok) { const e = new Error(String(r.status)); e.code = 'http_error'; throw e; }
+            return r.json().then(d => d.elements || []);
+          }),
         timeout
       ]);
     };
@@ -1681,7 +1712,8 @@ class MeerkatMapCard extends HTMLElement {
       return await Promise.any(proxyUrls.map(tryFetch));
     } catch (e) {
       if (signal && signal.aborted) throw new DOMException('', 'AbortError');
-      // Proxy not installed or all proxy attempts failed — fall back to direct
+      // Propagate typed aggregate error so callers can inspect error codes
+      throw e;
     }
 
     // Fallback: race mirrors directly (works on desktop, blocked on iOS without proxy)
@@ -2041,6 +2073,84 @@ class MeerkatMapCard extends HTMLElement {
     }
   }
 
+  // ── Friendly API info sheet ────────────────────────────────────────
+  // Shown when Overpass returns a rate-limit (429), is busy (503/timeout),
+  // or when the user tries to refresh before the cooldown has elapsed.
+  _showAPIInfoSheet(type, value) {
+    // Debounce: only show one sheet at a time
+    if (this._apiSheetOpen) return;
+    this._apiSheetOpen = true;
+
+    const isDark = this._isDark();
+    const bg     = isDark ? 'rgba(28,28,30,0.97)' : 'rgba(252,252,254,0.98)';
+    const tx     = isDark ? '#fff' : '#000';
+    const sub    = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)';
+    const bd     = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)';
+
+    const configs = {
+      rate_limit: {
+        icon: '⏱️',
+        title: 'Request limit reached',
+        body: `The OpenStreetMap servers have asked us to wait before making more requests. Please try again in ${value} second${value !== 1 ? 's' : ''}.`,
+        btnLabel: 'Got it',
+      },
+      busy: {
+        icon: '🌐',
+        title: 'Servers are busy',
+        body: 'The OpenStreetMap servers are currently under heavy load and could not be reached. Cached data is shown where available. Please try again in a moment.',
+        btnLabel: 'Got it',
+      },
+      cooldown: {
+        icon: '⏳',
+        title: 'Too soon to refresh',
+        body: `Please wait ${value} more second${value !== 1 ? 's' : ''} before refreshing again. This helps keep the OpenStreetMap servers happy.`,
+        btnLabel: 'Got it',
+      },
+    };
+
+    const { icon, title, body, btnLabel } = configs[type] || configs.busy;
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = [
+      'position:fixed;inset:0;z-index:99999',
+      'display:flex;align-items:flex-end;justify-content:center;padding:0 0 24px',
+      'background:rgba(0,0,0,0.5)',
+      'backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)',
+      'animation:mmFadeIn 0.2s ease',
+    ].join(';');
+
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `@keyframes mmFadeIn{from{opacity:0}to{opacity:1}}@keyframes mmSlideUp{from{transform:translateY(24px) scale(0.97);opacity:0}to{transform:none;opacity:1}}`;
+    overlay.appendChild(styleEl);
+
+    const panel = document.createElement('div');
+    panel.style.cssText = [
+      `background:${bg}`,
+      'backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%)',
+      `border:1px solid ${bd}`,
+      'border-radius:24px',
+      'padding:28px 24px 20px',
+      'width:calc(100% - 32px);max-width:400px',
+      `font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;color:${tx}`,
+      'animation:mmSlideUp 0.28s cubic-bezier(0.34,1.3,0.64,1)',
+      'text-align:center',
+    ].join(';');
+
+    panel.innerHTML = `
+      <div style="font-size:40px;margin-bottom:14px;">${icon}</div>
+      <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:10px;">${title}</div>
+      <div style="font-size:14px;color:${sub};line-height:1.55;margin-bottom:24px;">${body}</div>
+      <button id="mm-api-sheet-ok" style="width:100%;padding:14px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;">${btnLabel}</button>
+    `;
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    const close = () => { overlay.remove(); this._apiSheetOpen = false; };
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    panel.querySelector('#mm-api-sheet-ok').addEventListener('click', close);
+  }
+
   _stopFetch() {
     if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
     this._poiFetching = {};
@@ -2049,6 +2159,18 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   _confirmRefreshPOIs() {
+    // Enforce a 60-second cooldown between manual refreshes to avoid hammering
+    // the Overpass API. Show a friendly info sheet if the user taps too soon.
+    const COOLDOWN_MS = 60000;
+    try {
+      const lastRefresh = parseInt(localStorage.getItem('mmLastRefresh') || '0');
+      const elapsed = Date.now() - lastRefresh;
+      if (elapsed < COOLDOWN_MS) {
+        this._showAPIInfoSheet('cooldown', Math.ceil((COOLDOWN_MS - elapsed) / 1000));
+        return;
+      }
+    } catch (_) {}
+
     const isDark   = this._isDark();
     const bg       = isDark ? 'rgba(28,28,30,0.96)' : 'rgba(252,252,254,0.98)';
     const tx       = isDark ? '#fff' : '#000';
@@ -2089,6 +2211,9 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   _forceRefreshPOIs() {
+    // Record the time of this refresh for the cooldown guard
+    try { localStorage.setItem('mmLastRefresh', String(Date.now())); } catch (_) {}
+
     // Abort any in-flight requests
     if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
     this._poiFetching = {};
