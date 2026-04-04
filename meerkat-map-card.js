@@ -1525,54 +1525,39 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // ── Multi-strategy Overpass fetcher ───────────────────────────────
-  // Tries each mirror sequentially so that a failure on one always falls
-  // through to the next rather than relying on Promise.any timing.
-  // Proxy mirrors (through HA server) are tried first — same-origin so
-  // iOS never blocks them. Direct mirrors are the fallback for desktop.
   async _fetchOverpass(encodedQ, signal) {
+    const opts = { signal };
     const mirrorUrls = [
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
     ];
-
-    // Per-mirror fetch: own AbortController so a 10s timeout on one mirror
-    // never bleeds into the next attempt.
-    const tryOne = async url => {
-      if (signal?.aborted) throw new DOMException('', 'AbortError');
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), 10000);
-      const onParent = () => ac.abort();
-      signal?.addEventListener('abort', onParent, { once: true });
-      try {
-        const r = await fetch(url, { signal: ac.signal });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const d = await r.json();
-        return d.elements || [];
-      } finally {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onParent);
-      }
+    const tryFetch = url => {
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 20000)
+      );
+      return Promise.race([
+        fetch(url, opts)
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(d => d.elements || []),
+        timeout
+      ]);
     };
 
-    const isAbort = e => signal?.aborted || e?.name === 'AbortError';
-
-    // Round 1: proxy mirrors (HA server — same-origin, works on iOS)
+    // Always try the HA proxy first — routes through HA server so it is
+    // same-origin and never blocked on iOS.
     const proxyUrls = mirrorUrls.map(
       u => `/api/hass_web_proxy/v0/?url=${encodeURIComponent(u)}`
     );
-    for (const url of proxyUrls) {
-      try { return await tryOne(url); }
-      catch (e) { if (isAbort(e)) throw new DOMException('', 'AbortError'); }
+    try {
+      return await Promise.any(proxyUrls.map(tryFetch));
+    } catch (e) {
+      if (signal && signal.aborted) throw new DOMException('', 'AbortError');
+      // Proxy not installed or all proxy attempts failed — fall back to direct
     }
 
-    // Round 2: direct mirrors (works on desktop; blocked on iOS without proxy)
-    for (const url of mirrorUrls) {
-      try { return await tryOne(url); }
-      catch (e) { if (isAbort(e)) throw new DOMException('', 'AbortError'); }
-    }
-
-    throw new Error('All Overpass mirrors failed');
+    // Fallback: race mirrors directly (works on desktop, blocked on iOS without proxy)
+    return await Promise.any(mirrorUrls.map(tryFetch));
   }
 
     _renderPOILayer(cat, elements) {
@@ -2257,9 +2242,14 @@ class MeerkatMapCardEditor extends HTMLElement {
         return s?.attributes?.latitude && s?.attributes?.longitude;
       })
       .sort((a, b) => {
-        const aS = selected.includes(a) ? 0 : 1;
-        const bS = selected.includes(b) ? 0 : 1;
-        if (aS !== bS) return aS - bS;
+        const aIdx = selected.indexOf(a);
+        const bIdx = selected.indexOf(b);
+        // Both selected: preserve the order from family_members
+        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+        // One selected, one not: selected comes first
+        if (aIdx !== -1) return -1;
+        if (bIdx !== -1) return 1;
+        // Neither selected: alphabetical
         return a.localeCompare(b);
       });
 
