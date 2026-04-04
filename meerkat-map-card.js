@@ -194,6 +194,9 @@ class MeerkatMapCard extends HTMLElement {
     this._poiElementsBounds = null; // bounds at the time _poiElements was captured
     // Global accumulator: catKey → { osmId: element } — survives pans & zooms
     this._poiAllElements = {};
+    // Lightweight in-memory record of which areas have been fetched per category.
+    // Mirrors mmPOIFetched:cat in localStorage. Decouples fetch-decision from data.
+    this._fetchedRegions = {};
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -579,6 +582,7 @@ class MeerkatMapCard extends HTMLElement {
         this._poiElements     = {};
         this._poiElementsBounds = null;
         this._lastFetchBounds = null;
+        this._fetchedRegions  = {};
         this._poiFetching     = {};
         for (const cat of MM_POIS) {
           if (this._poiLayers[cat.key]) {
@@ -634,16 +638,15 @@ class MeerkatMapCard extends HTMLElement {
         // renders them — this is the primary path after a full app close/reopen.
         this._restorePOIsFromCache();
 
-        // Only trigger a network prefetch if the accumulator has NO data yet
-        // for at least one enabled category. If all categories are covered by
-        // the accumulator the user sees markers immediately with no spinner.
+        // Only trigger a network prefetch if at least one enabled category
+        // has not been fetched for the current area yet. _isAreaFetched checks
+        // both the in-memory region index and mmPOIFetched:cat in localStorage.
         const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-        const allCoveredByAccumulator = enabled.length === 0 || enabled.every(cat =>
-          this._poiAllElements &&
-          this._poiAllElements[cat.key] &&
-          Object.keys(this._poiAllElements[cat.key]).length > 0
-        );
-        if (!allCoveredByAccumulator) {
+        const mapB = this._map.getBounds();
+        const bs = mapB.getSouth(), bw = mapB.getWest(), bn = mapB.getNorth(), be = mapB.getEast();
+        const allFetched = enabled.length === 0 ||
+          enabled.every(cat => this._isAreaFetched(cat, bs, bw, bn, be));
+        if (!allFetched) {
           setTimeout(() => this._prefetchPOIs(), 600);
         }
       });
@@ -1352,33 +1355,14 @@ class MeerkatMapCard extends HTMLElement {
     // Update last fetch bounds (used by moveend to skip redundant reloads)
     this._lastFetchBounds = { s, w, n, e };
 
-    // Step 1: render any cached data instantly for all enabled categories
+    // Determine which categories still need a network fetch for this area.
+    // _isAreaFetched checks the lightweight mmPOIFetched:cat regions list,
+    // which records bounding boxes of every previously fetched area. The
+    // actual data is always served from the global accumulator (_poiAllElements)
+    // so the layer continues to show all cached markers during any fetch.
     const needsFetch = [];
     for (const cat of enabled) {
-      // Cache check — localStorage exact key first, then nearby fallback.
-      // _poiElements is NOT used here because it is not location-aware;
-      // it is only used by _restorePOIsFromCache during reconnect.
-      const cacheKey = this._poiCacheKey(cat, s, w, n, e);
-      let fromCache = false;
-      try {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-          const { ts, elements } = JSON.parse(cached);
-          if (Date.now() - ts < this._cacheTTL) {
-            this._renderPOILayer(cat, elements);
-            fromCache = true;
-            continue; // valid cache — no network request needed
-          }
-        }
-      } catch (_) {}
-      if (!fromCache) {
-        const fb = this._poiCacheFallback(cat, s, w, n, e);
-        if (fb) {
-          this._renderPOILayer(cat, fb);
-          continue; // nearby cache covers this area — no fetch needed
-        }
-      }
-      needsFetch.push(cat);
+      if (!this._isAreaFetched(cat, s, w, n, e)) needsFetch.push(cat);
     }
 
     if (!needsFetch.length) return;
@@ -1425,44 +1409,8 @@ class MeerkatMapCard extends HTMLElement {
   // when the user pans a short distance the data is already cached.
   async _prefetchPOIs() {
     if (!this._mapInitialised || !this._map) return;
-    const b   = this._map.getBounds();
-    const vs  = b.getSouth(), vw = b.getWest(), vn = b.getNorth(), ve = b.getEast();
-
-    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-
-    // If in-memory elements (restored from localStorage) already cover this
-    // location, just render them — no network request needed.
-    const eb = this._poiElementsBounds;
-    const midLat = (vs + vn) / 2, midLng = (vw + ve) / 2;
-    if (eb && this._poiElements && Object.keys(this._poiElements).length > 0 &&
-        midLat >= eb.s && midLat <= eb.n && midLng >= eb.w && midLng <= eb.e) {
-      this._loadAllPOIs(vs, vw, vn, ve);
-      return;
-    }
-
-    // If fetch bounds were restored from a previous session at this same location,
-    // render from cache directly — no allCached scan needed.
-    // The moveend handler will have already skipped the reload if bounds match,
-    // but _prefetchPOIs is called on init before moveend fires.
-    const allCached = enabled.length > 0 && enabled.every(cat => {
-      try {
-        const key = this._poiCacheKey(cat, vs, vw, vn, ve);
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          const { ts } = JSON.parse(raw);
-          if (Date.now() - ts < this._cacheTTL) return true;
-        }
-      } catch (_) {}
-      return this._poiCacheFallback(cat, vs, vw, vn, ve) !== null;
-    });
-
-    if (allCached) {
-      // All covered by cache — render instantly, no ring, no network
-      this._loadAllPOIs(vs, vw, vn, ve);
-      return;
-    }
-
-    // Fetch with 25% expanded bounds so short pans are pre-cached
+    const b  = this._map.getBounds();
+    const vs = b.getSouth(), vw = b.getWest(), vn = b.getNorth(), ve = b.getEast();
     const latPad = (vn - vs) * 0.25;
     const lngPad = (ve - vw) * 0.25;
     const s = vs - latPad, n = vn + latPad;
@@ -1587,6 +1535,62 @@ class MeerkatMapCard extends HTMLElement {
     return null;
   }
 
+  // ── Fetched-region helpers ────────────────────────────────────────
+  // These replace the old bounds-keyed data-cache as the "have we fetched
+  // this area?" signal. The actual data lives in the accumulator.
+
+  _isAreaFetched(cat, s, w, n, e) {
+    // A category with an empty accumulator must always be fetched.
+    if (!this._poiAllElements?.[cat.key] ||
+        Object.keys(this._poiAllElements[cat.key]).length === 0) return false;
+
+    const midLat = (s + n) / 2, midLng = (w + e) / 2;
+    const ttl    = this._cacheTTL;
+    const nowMs  = Date.now();
+
+    // In-memory fast path
+    const mem = this._fetchedRegions?.[cat.key];
+    if (mem) {
+      for (const r of mem) {
+        if (nowMs - r.ts < ttl &&
+            midLat >= r.s && midLat <= r.n &&
+            midLng >= r.w && midLng <= r.e) return true;
+      }
+    }
+
+    // localStorage fallback (warms the in-memory cache on hit)
+    try {
+      const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
+      if (!raw) return false;
+      const stored = JSON.parse(raw);
+      for (const r of stored) {
+        if (nowMs - r.ts < ttl &&
+            midLat >= r.s && midLat <= r.n &&
+            midLng >= r.w && midLng <= r.e) {
+          if (!this._fetchedRegions) this._fetchedRegions = {};
+          this._fetchedRegions[cat.key] = stored;
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  _saveFetchedRegion(cat, s, w, n, e) {
+    const entry = { s, w, n, e, ts: Date.now() };
+    if (!this._fetchedRegions)           this._fetchedRegions = {};
+    if (!this._fetchedRegions[cat.key])  this._fetchedRegions[cat.key] = [];
+    this._fetchedRegions[cat.key].push(entry);
+    try {
+      const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
+      const arr = raw ? JSON.parse(raw) : [];
+      arr.push(entry);
+      // Cap at 200 entries per category to keep localStorage footprint bounded
+      if (arr.length > 200) arr.splice(0, arr.length - 200);
+      localStorage.setItem(`mmPOIFetched:${cat.key}`, JSON.stringify(arr));
+    } catch (_) {}
+  }
+
   // ── Batch fetch: one Overpass request for up to 5 categories ─────────
   async _loadPOIBatch(batch, s, w, n, e, signal, gen) {
     // Guard: skip if all cats in this batch are already fetching
@@ -1619,8 +1623,7 @@ class MeerkatMapCard extends HTMLElement {
 
       toFetch.forEach(cat => {
         const els = byKey[cat.key] || [];
-        const cacheKey = this._poiCacheKey(cat, s, w, n, e);
-        try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), elements: els })); } catch (_) {}
+        this._saveFetchedRegion(cat, s, w, n, e);
         this._renderPOILayer(cat, els);
         if (this._poiFetching) this._poiFetching[cat.key] = false;
       });
@@ -2092,7 +2095,7 @@ class MeerkatMapCard extends HTMLElement {
       rate_limit: {
         icon: '⏱️',
         title: 'Request limit reached',
-        body: `The OpenStreetMap servers have asked us to wait before making more requests. Please try again in ${value} second${value !== 1 ? 's' : ''}.`,
+        body: 'The OpenStreetMap servers have asked us to wait before making more requests. Please try again soon.',
         btnLabel: 'Got it',
       },
       busy: {
@@ -2201,13 +2204,14 @@ class MeerkatMapCard extends HTMLElement {
     this._poiElementsBounds = null;
     this._lastFetchBounds = null; // bypass bounds check
     this._poiAllElements = {}; // clear global accumulator
+    this._fetchedRegions = {}; // clear in-memory fetched-regions index
 
-    // Clear localStorage — all POI cache entries (bounds-based and global)
+    // Clear localStorage — all POI cache entries (accumulator, fetched-regions)
     try {
       const keys = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:'))) keys.push(k);
+        if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOIFetched:'))) keys.push(k);
       }
       keys.forEach(k => localStorage.removeItem(k));
       localStorage.removeItem('mmPOIElements');
@@ -2715,9 +2719,10 @@ class MeerkatMapCardEditor extends HTMLElement {
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
           if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') ||
+              k.startsWith('mmPOIFetched:') ||
               k === 'mmPOIElements' || k === 'mmPOIElementsBounds')) {
             const v = localStorage.getItem(k) || '';
-            bytes += (k.length + v.length) * 2; // UTF-16 chars = 2 bytes each
+            bytes += (k.length + v.length) * 2;
             entries++;
           }
         }
@@ -2739,7 +2744,7 @@ class MeerkatMapCardEditor extends HTMLElement {
           const keys = [];
           for (let i = 0; i < localStorage.length; i++) {
             const k = localStorage.key(i);
-            if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:'))) keys.push(k);
+            if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOIFetched:'))) keys.push(k);
           }
           keys.forEach(k => localStorage.removeItem(k));
           localStorage.removeItem('mmPOIElements');
