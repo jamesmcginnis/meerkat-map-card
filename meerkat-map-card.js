@@ -2105,7 +2105,7 @@ class MeerkatMapCardEditor extends HTMLElement {
         }
         input[type="text"], input[type="number"] { background-image: none; padding-right: 12px; }
         .toggle-list { display: flex; flex-direction: column; }
-        .toggle-item { display: flex; align-items: center; justify-content: space-between; padding: 11px 16px; border-bottom: 1px solid rgba(128,128,128,0.1); min-height: 48px; }
+        .toggle-item { display: flex; align-items: center; justify-content: space-between; padding: 11px 8px 11px 6px; border-bottom: 1px solid rgba(128,128,128,0.1); min-height: 48px; }
         .toggle-item:last-child { border-bottom: none; }
         .toggle-label { font-size: 14px; font-weight: 500; flex: 1; padding-right: 12px; }
         .toggle-sublabel { font-size: 11px; color: #888; margin-top: 1px; }
@@ -2295,24 +2295,21 @@ class MeerkatMapCardEditor extends HTMLElement {
     const selected    = Array.isArray(cfg.family_members) ? cfg.family_members : [];
     const mainEntity  = cfg.person_entity || '';
 
-    // Collect all entities with GPS coords, excluding the main tracked person
-    const candidates = Object.keys(this._hass.states)
+    // Collect all entities with GPS coords, excluding the main tracked person.
+    // Selected entities appear first in the exact order stored in family_members
+    // (the user's chosen order). Unselected follow alphabetically.
+    const allWithGPS = Object.keys(this._hass.states)
       .filter(e => {
         if (e === mainEntity) return false;
         const s = this._hass.states[e];
         return s?.attributes?.latitude && s?.attributes?.longitude;
-      })
-      .sort((a, b) => {
-        const aIdx = selected.indexOf(a);
-        const bIdx = selected.indexOf(b);
-        // Both selected: preserve the order from family_members
-        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-        // One selected, one not: selected comes first
-        if (aIdx !== -1) return -1;
-        if (bIdx !== -1) return 1;
-        // Neither selected: alphabetical
-        return a.localeCompare(b);
       });
+
+    const selectedInOrder = selected.filter(e => allWithGPS.includes(e));
+    const unselected = allWithGPS
+      .filter(e => !selected.includes(e))
+      .sort((a, b) => a.localeCompare(b));
+    const candidates = [...selectedInOrder, ...unselected];
 
     const q = (filter || '').toLowerCase();
     const filtered = q
@@ -2365,7 +2362,7 @@ class MeerkatMapCardEditor extends HTMLElement {
               <div style="font-size:11px;color:${subCol};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entityId}</div>
             </div>
           </div>
-          <label class="toggle-switch">
+          <label class="toggle-switch" style="margin-right:8px;">
             <input type="checkbox" data-family-entity="${entityId}" ${isSelected ? 'checked' : ''}>
             <span class="toggle-track"></span>
           </label>
