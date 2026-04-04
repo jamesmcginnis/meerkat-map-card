@@ -2287,122 +2287,148 @@ class MeerkatMapCardEditor extends HTMLElement {
 
   // ── Family member checklist ───────────────────────────────────────
   _buildFamilyList(filter) {
-    const root     = this.shadowRoot;
-    const listEl   = root.getElementById('mm-family-list');
+    const root   = this.shadowRoot;
+    const listEl = root.getElementById('mm-family-list');
     if (!listEl || !this._hass) return;
 
-    const cfg         = this._config || {};
-    const selected    = Array.isArray(cfg.family_members) ? cfg.family_members : [];
-    const mainEntity  = cfg.person_entity || '';
+    const cfg        = this._config || {};
+    const selected   = Array.isArray(cfg.family_members) ? cfg.family_members : [];
+    const mainEntity = cfg.person_entity || '';
 
-    // Collect all entities with GPS coords, excluding the main tracked person.
-    // Selected entities appear first in the exact order stored in family_members
-    // (the user's chosen order). Unselected follow alphabetically.
-    const allWithGPS = Object.keys(this._hass.states)
-      .filter(e => {
-        if (e === mainEntity) return false;
-        const s = this._hass.states[e];
-        return s?.attributes?.latitude && s?.attributes?.longitude;
-      });
+    // All entities with GPS coords, excluding the main person
+    const allWithGPS = Object.keys(this._hass.states).filter(e => {
+      if (e === mainEntity) return false;
+      const s = this._hass.states[e];
+      return s?.attributes?.latitude && s?.attributes?.longitude;
+    });
 
+    // Selected entities in user-defined order first, then unselected alphabetically
     const selectedInOrder = selected.filter(e => allWithGPS.includes(e));
-    const unselected = allWithGPS
-      .filter(e => !selected.includes(e))
-      .sort((a, b) => a.localeCompare(b));
-    const candidates = [...selectedInOrder, ...unselected];
+    const unselected      = allWithGPS.filter(e => !selected.includes(e)).sort((a, b) => a.localeCompare(b));
+    const candidates      = [...selectedInOrder, ...unselected];
 
-    const q = (filter || '').toLowerCase();
-    const filtered = q
-      ? candidates.filter(e => {
-          const name = (this._hass.states[e]?.attributes?.friendly_name || '').toLowerCase();
-          return e.toLowerCase().includes(q) || name.includes(q);
-        })
-      : candidates;
+    const q        = (filter || '').toLowerCase();
+    const filtered = q ? candidates.filter(e => {
+      const n = (this._hass.states[e]?.attributes?.friendly_name || '').toLowerCase();
+      return e.toLowerCase().includes(q) || n.includes(q);
+    }) : candidates;
 
-    const isDark   = (this._config?.theme || 'dark') !== 'light';
-    const subCol   = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)';
+    const isDark = (this._config?.theme || 'dark') !== 'light';
+    const sub    = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)';
+    const noEntities = `<div style="padding:16px;text-align:center;font-size:13px;color:${sub};">No entities with GPS coordinates found</div>`;
 
-    listEl.innerHTML = filtered.map((entityId, i) => {
+    // Clear and rebuild list entirely with DOM nodes (not innerHTML) to avoid any parsing issues
+    listEl.innerHTML = '';
+
+    if (!filtered.length) {
+      listEl.innerHTML = noEntities;
+      return;
+    }
+
+    filtered.forEach((entityId, i) => {
       const state      = this._hass.states[entityId];
       const name       = state?.attributes?.friendly_name || entityId;
       const picUrl     = state?.attributes?.entity_picture || '';
       const isSelected = selected.includes(entityId);
-      const selIdx     = selected.indexOf(entityId); // position within selected list
+      const selIdx     = selected.indexOf(entityId);
       const zone       = (state?.state || '').toLowerCase();
       const zoneColor  = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : '#AF52DE';
-      const avatar     = picUrl
-        ? `<img src="${picUrl}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid ${zoneColor};flex-shrink:0;" alt="${name}">`
-        : `<div style="width:32px;height:32px;border-radius:50%;background:${zoneColor}22;border:2px solid ${zoneColor};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:${zoneColor};flex-shrink:0;">${(name[0]||'?').toUpperCase()}</div>`;
 
-      // Up/down reorder buttons — only shown for selected entities, disabled at the edges
-      const canUp   = isSelected && selIdx > 0;
-      const canDown = isSelected && selIdx < selected.length - 1;
-      const btnBase = 'border:none;border-radius:6px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.15s;flex-shrink:0;';
-      const reorderBtns = isSelected ? `
-        <div style="display:flex;flex-direction:column;gap:2px;padding:0 4px 0 2px;flex-shrink:0;">
-          <button data-move-entity="${entityId}" data-move-dir="up"
-            style="${btnBase}background:${canUp ? 'rgba(0,122,255,0.12)' : 'transparent'};color:${canUp ? '#007AFF' : 'rgba(128,128,128,0.25)'};"
-            ${canUp ? '' : 'disabled'} title="Move up">
-            <svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 14l5-5 5 5z" fill="currentColor"/></svg>
-          </button>
-          <button data-move-entity="${entityId}" data-move-dir="down"
-            style="${btnBase}background:${canDown ? 'rgba(0,122,255,0.12)' : 'transparent'};color:${canDown ? '#007AFF' : 'rgba(128,128,128,0.25)'};"
-            ${canDown ? '' : 'disabled'} title="Move down">
-            <svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 10l5 5 5-5z" fill="currentColor"/></svg>
-          </button>
-        </div>` : `<div style="width:30px;flex-shrink:0;"></div>`;
+      // Row container
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex;align-items:center;min-height:52px;padding:6px 12px 6px 4px;${i > 0 ? 'border-top:1px solid rgba(128,128,128,0.1);' : ''}`;
 
-      return `
-        <div class="toggle-item" data-family-row="${entityId}" style="${i > 0 ? 'border-top:1px solid rgba(128,128,128,0.1);' : ''}">
-          ${reorderBtns}
-          <div class="toggle-left" style="display:flex;align-items:center;gap:10px;flex:1;">
-            ${avatar}
-            <div style="flex:1;min-width:0;">
-              <div class="toggle-label" style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</div>
-              <div style="font-size:11px;color:${subCol};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entityId}</div>
-            </div>
-          </div>
-          <label class="toggle-switch" style="margin-right:8px;">
-            <input type="checkbox" data-family-entity="${entityId}" ${isSelected ? 'checked' : ''}>
-            <span class="toggle-track"></span>
-          </label>
-        </div>`;
-    }).join('') || `<div style="padding:16px;text-align:center;font-size:13px;color:${subCol};">No entities with GPS coordinates found</div>`;
+      // ── Up/Down buttons (only for selected) ──
+      const btnWrap = document.createElement('div');
+      btnWrap.style.cssText = 'display:flex;flex-direction:column;gap:1px;flex-shrink:0;margin-right:4px;';
 
-    const searchVal = () => this.shadowRoot.getElementById('mm-family-search')?.value || '';
+      if (isSelected) {
+        const canUp   = selIdx > 0;
+        const canDown = selIdx < selected.length - 1;
 
-    // Wire up toggles
-    listEl.querySelectorAll('input[data-family-entity]').forEach(input => {
-      input.onchange = () => {
-        const id  = input.dataset.familyEntity;
-        let cur   = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
-        if (input.checked) {
-          if (!cur.includes(id)) cur.push(id);
-        } else {
-          cur = cur.filter(x => x !== id);
-        }
+        const mkBtn = (dir, enabled) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.title = dir === 'up' ? 'Move up' : 'Move down';
+          btn.style.cssText = `display:flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;border-radius:5px;cursor:${enabled ? 'pointer' : 'default'};background:${enabled ? 'rgba(0,122,255,0.13)' : 'transparent'};color:${enabled ? '#007AFF' : 'rgba(128,128,128,0.25)'};padding:0;flex-shrink:0;`;
+          btn.innerHTML = dir === 'up'
+            ? `<svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 14l5-5 5 5z" fill="currentColor"/></svg>`
+            : `<svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 10l5 5 5-5z" fill="currentColor"/></svg>`;
+          if (!enabled) { btn.disabled = true; return btn; }
+          btn.addEventListener('click', () => {
+            let cur = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
+            const idx = cur.indexOf(entityId);
+            if (idx === -1) return;
+            if (dir === 'up'   && idx > 0)              { [cur[idx-1], cur[idx]] = [cur[idx], cur[idx-1]]; }
+            if (dir === 'down' && idx < cur.length - 1) { [cur[idx], cur[idx+1]] = [cur[idx+1], cur[idx]]; }
+            this._updateConfig('family_members', cur);
+            this._buildFamilyList(root.getElementById('mm-family-search')?.value || '');
+          });
+          return btn;
+        };
+
+        btnWrap.appendChild(mkBtn('up',   canUp));
+        btnWrap.appendChild(mkBtn('down', canDown));
+      } else {
+        // Spacer so unselected rows align with selected ones
+        btnWrap.style.width = '28px';
+      }
+      row.appendChild(btnWrap);
+
+      // ── Avatar ──
+      const avatarEl = document.createElement('div');
+      avatarEl.style.cssText = `width:32px;height:32px;border-radius:50%;overflow:hidden;border:2px solid ${zoneColor};flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${zoneColor}22;margin-right:10px;`;
+      if (picUrl) {
+        const img = document.createElement('img');
+        img.src = picUrl; img.alt = name;
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+        img.onerror = () => { img.style.display = 'none'; };
+        avatarEl.appendChild(img);
+      } else {
+        avatarEl.style.fontSize = '14px';
+        avatarEl.style.fontWeight = '700';
+        avatarEl.style.color = zoneColor;
+        avatarEl.textContent = (name[0] || '?').toUpperCase();
+      }
+      row.appendChild(avatarEl);
+
+      // ── Label ──
+      const labelWrap = document.createElement('div');
+      labelWrap.style.cssText = 'flex:1;min-width:0;margin-right:10px;';
+      const nameEl = document.createElement('div');
+      nameEl.style.cssText = 'font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      nameEl.textContent = name;
+      const idEl = document.createElement('div');
+      idEl.style.cssText = `font-size:11px;color:${sub};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+      idEl.textContent = entityId;
+      labelWrap.appendChild(nameEl);
+      labelWrap.appendChild(idEl);
+      row.appendChild(labelWrap);
+
+      // ── Toggle switch ──
+      const label = document.createElement('label');
+      label.style.cssText = 'position:relative;width:51px;height:31px;flex-shrink:0;';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = isSelected;
+      checkbox.style.cssText = 'opacity:0;width:0;height:0;position:absolute;';
+      checkbox.addEventListener('change', () => {
+        let cur = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
+        if (checkbox.checked) { if (!cur.includes(entityId)) cur.push(entityId); }
+        else { cur = cur.filter(x => x !== entityId); }
         this._updateConfig('family_members', cur);
-        this._buildFamilyList(searchVal());
-      };
-    });
-
-    // Wire up up/down reorder buttons
-    listEl.querySelectorAll('button[data-move-entity]').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.preventDefault();
-        const id  = btn.dataset.moveEntity;
-        const dir = btn.dataset.moveDir;
-        let cur   = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
-        const idx = cur.indexOf(id);
-        if (idx === -1) return;
-        if (dir === 'up' && idx > 0) {
-          [cur[idx - 1], cur[idx]] = [cur[idx], cur[idx - 1]];
-        } else if (dir === 'down' && idx < cur.length - 1) {
-          [cur[idx], cur[idx + 1]] = [cur[idx + 1], cur[idx]];
-        }
-        this._updateConfig('family_members', cur);
-        this._buildFamilyList(searchVal());
+        this._buildFamilyList(root.getElementById('mm-family-search')?.value || '');
       });
+      const track = document.createElement('span');
+      track.style.cssText = `position:absolute;inset:0;border-radius:31px;background:${isSelected ? '#34C759' : 'rgba(120,120,128,0.32)'};cursor:pointer;transition:background 0.25s;`;
+      const thumb = document.createElement('span');
+      thumb.style.cssText = `position:absolute;width:27px;height:27px;border-radius:50%;background:#fff;top:2px;left:${isSelected ? '22px' : '2px'};box-shadow:0 2px 6px rgba(0,0,0,0.3);transition:left 0.25s;`;
+      track.appendChild(thumb);
+      label.appendChild(checkbox);
+      label.appendChild(track);
+      row.appendChild(label);
+
+      listEl.appendChild(row);
     });
   }
 
@@ -2467,7 +2493,8 @@ class MeerkatMapCardEditor extends HTMLElement {
     root.querySelectorAll('input[name="poi_icon_size"]').forEach(r => r.checked = r.value === (cfg.poi_icon_size || 'medium'));
     root.querySelectorAll('input[name="person_icon_size"]').forEach(r => r.checked = r.value === (cfg.person_icon_size || 'medium'));
     root.querySelectorAll('input[data-key]').forEach(r => r.checked = !!cfg[r.dataset.key]);
-    this._buildFamilyList();
+    // Use setTimeout so the re-render doesn't destroy DOM mid-event (e.g. button click)
+    setTimeout(() => this._buildFamilyList(), 0);
   }
 
   _updateConfig(key, value) {
