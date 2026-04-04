@@ -22,17 +22,17 @@ Tap the map pin button in the top-right controls to open a bottom sheet where yo
 
 ## Points of interest
 
-53 POI categories across 7 groups, toggled individually in the visual editor. Data is fetched from OpenStreetMap via Overpass API and cached locally so the map reloads instantly on repeat visits without any network request.
+53 POI categories across 8 groups, toggled individually in the visual editor. Data is fetched from OpenStreetMap via Overpass API and cached locally. All POIs fetched across every area you visit are accumulated and kept — panning or zooming never causes previously loaded markers to disappear. Returning to any visited location restores all markers instantly from cache with no network request.
 
 > **Note:** Enable only a small number of categories at once, especially on mobile. A small selection of the most useful categories works best.
 
 **Enabled by default:** Train Stations, Bus Stops, Hospitals, Pharmacies, Supermarkets.
 
-Tap any POI marker to see its name, category, address, opening hours, phone (tap to call), website, distance from the tracked person, and any available extra details such as cuisine, wheelchair access, fees, operator, brand, network, and coordinates.
+Tap any POI marker to see its name, category, address, opening hours, phone (tap to call — a confirmation sheet appears before dialling), website, distance from the tracked person, and any available extra details such as cuisine, wheelchair access, fees, operator, brand, network, and coordinates.
 
 ## POI status ring
 
-A small ring in the bottom-left corner shows the current loading state at all times. It breathes yellow while fetching, pulses green on success, and fades from red back to white on failure. The centre button stops an active fetch or opens a confirmation prompt to force a full reload of the current area.
+A small ring in the bottom-left corner shows the current loading state at all times. It breathes yellow while fetching, pulses green on success, and fades from red back to white on failure. The centre button stops an active fetch or opens a confirmation prompt to clear all cached POI data and download fresh information from OpenStreetMap.
 
 ## iPhone and iPad
 
@@ -51,7 +51,7 @@ See the [README](README.md) for full setup steps.
 The visual editor includes a Cache Settings section where you can:
 
 - Set the **cache duration** — how long POI data is kept before being considered stale. The default of 48 hours is recommended, as POIs like bus stops and hospitals change very rarely.
-- **Clear all cached data** — removes all saved POI data from the device immediately.
+- **Clear all cached data** — removes all saved POI data from the device immediately. The current cache size is shown directly below the button so you can see how much is stored before clearing.
 
 ## Visual editor
 
@@ -62,8 +62,10 @@ All settings are configurable through the built-in visual editor — no YAML req
 - Map height and default zoom level
 - Dark / Light / Auto theme
 - Distance units (km/m, mi/m, or mi/yd)
-- Cache duration and clear cache button
-- 53 POI category toggles organised into 7 groups (also accessible via the map pin button on the map)
+- POI icon size (Small / Medium / Large)
+- Person icon size (Small / Medium / Large)
+- Cache duration, cache size display, and clear cache button
+- 53 POI category toggles organised into 8 groups (also accessible via the map pin button on the map)
 
 ## Compatibility
 
