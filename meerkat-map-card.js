@@ -747,7 +747,7 @@ class MeerkatMapCard extends HTMLElement {
     if (this._personMarker) {
       this._personMarker.setLatLng([lat, lng]).setIcon(icon);
     } else {
-      this._personMarker = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(this._map);
+      this._personMarker = L.marker([lat, lng], { icon, zIndexOffset: -100 }).addTo(this._map);
     }
 
     this._personMarker.off('click');
@@ -811,7 +811,7 @@ class MeerkatMapCard extends HTMLElement {
       if (this._familyMarkers[entityId]) {
         this._familyMarkers[entityId].setLatLng([lat, lng]).setIcon(icon);
       } else {
-        this._familyMarkers[entityId] = L.marker([lat, lng], { icon, zIndexOffset: 900 }).addTo(this._map);
+        this._familyMarkers[entityId] = L.marker([lat, lng], { icon, zIndexOffset: -200 }).addTo(this._map);
       }
       this._familyMarkers[entityId].off('click');
       this._familyMarkers[entityId].on('click', () => this._openFamilyMemberPopup(state, lat, lng));
@@ -867,7 +867,7 @@ class MeerkatMapCard extends HTMLElement {
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;align-items:center;gap:14px;padding:10px 20px 14px;';
     header.innerHTML = `
-      <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};flex-shrink:0;background:${isDark ? '#2c2c2e' : '#e0e0e0'};display:flex;align-items:center;justify-content:center;">
+      <div id="mm-family-avatar" style="width:54px;height:54px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};flex-shrink:0;background:${isDark ? '#2c2c2e' : '#e0e0e0'};display:flex;align-items:center;justify-content:center;cursor:pointer;" title="Fly to ${name}">
         ${picUrl ? `<img src="${picUrl}" style="width:100%;height:100%;object-fit:cover;" alt="${name}">` : `<span style="font-size:22px;font-weight:700;color:${zoneColor};">${(name[0]||'?').toUpperCase()}</span>`}
       </div>
       <div style="flex:1;min-width:0;">
@@ -911,6 +911,10 @@ class MeerkatMapCard extends HTMLElement {
 
     overlay.addEventListener('click', () => this._closeAllOverlays());
     popup.querySelector('#mm-family-popup-close').addEventListener('click', () => this._closeAllOverlays());
+    popup.querySelector('#mm-family-avatar').addEventListener('click', () => {
+      this._closeAllOverlays();
+      this._map.flyTo([lat, lng], parseInt(this._config.zoom_level) || 15, { duration: 1.2 });
+    });
 
     this._reverseGeocode(lat, lng, true).then(addr => {
       const valEl = geoRow.querySelector('.mm-info-value');
@@ -1172,7 +1176,7 @@ class MeerkatMapCard extends HTMLElement {
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;align-items:center;gap:14px;padding:10px 20px 14px;';
     header.innerHTML = `
-      <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};flex-shrink:0;background:${isDark ? '#2c2c2e' : '#e0e0e0'};display:flex;align-items:center;justify-content:center;">
+      <div id="mm-person-avatar" style="width:54px;height:54px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};flex-shrink:0;background:${isDark ? '#2c2c2e' : '#e0e0e0'};display:flex;align-items:center;justify-content:center;cursor:pointer;" title="Fly to ${name}">
         ${picUrl ? `<img src="${picUrl}" style="width:100%;height:100%;object-fit:cover;" alt="${name}">` : `<span style="font-size:22px;font-weight:700;color:${zoneColor};">${(name[0]||'?').toUpperCase()}</span>`}
       </div>
       <div style="flex:1;min-width:0;">
@@ -1294,6 +1298,10 @@ class MeerkatMapCard extends HTMLElement {
 
     overlay.addEventListener('click', () => this._closeAllOverlays());
     popup.querySelector('#mm-popup-close').addEventListener('click', () => this._closeAllOverlays());
+    popup.querySelector('#mm-person-avatar').addEventListener('click', () => {
+      this._closeAllOverlays();
+      this._map.flyTo([lat, lng], parseInt(this._config.zoom_level) || 15, { duration: 1.2 });
+    });
 
     // Geocode async — own address
     this._reverseGeocode(lat, lng).then(addr => {
