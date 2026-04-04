@@ -339,6 +339,10 @@ class MeerkatMapCard extends HTMLElement {
     this._poiPending      = 0;
     this._lastFetchBounds = null;
     if (this._fetchAbortCtrl) { this._fetchAbortCtrl.abort(); this._fetchAbortCtrl = null; }
+    if (this._cacheClearedHandler) {
+      window.removeEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
+      this._cacheClearedHandler = null;
+    }
     this._loadGen = 0; this._ringGen = 0;
     this._mapCentredOnce = false;
     // Clear shadow DOM so _render() rebuilds the map container on reconnect
@@ -566,6 +570,24 @@ class MeerkatMapCard extends HTMLElement {
 
       this._mapInitialised = true;
       this._mapIniting     = false;
+
+      // Listen for cache-clear events fired by the visual editor so the live
+      // card wipes its in-memory state and removes all POI layers immediately —
+      // without this the editor's localStorage clear has no visible effect.
+      this._cacheClearedHandler = () => {
+        this._poiAllElements  = {};
+        this._poiElements     = {};
+        this._poiElementsBounds = null;
+        this._lastFetchBounds = null;
+        this._poiFetching     = {};
+        for (const cat of MM_POIS) {
+          if (this._poiLayers[cat.key]) {
+            this._map.removeLayer(this._poiLayers[cat.key]);
+            delete this._poiLayers[cat.key];
+          }
+        }
+      };
+      window.addEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
 
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
@@ -2042,7 +2064,7 @@ class MeerkatMapCard extends HTMLElement {
         This will refetch data and download fresh information from OpenStreetMap.
         It may take a moment to load, especially on mobile.
       </div>
-      <button id="mm-confirm-yes" style="width:100%;padding:14px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;font-family:inherit;">Clear Cache &amp; Reload</button>
+      <button id="mm-confirm-yes" style="width:100%;padding:14px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;font-family:inherit;">Reload</button>
       <button id="mm-confirm-no"  style="width:100%;padding:14px;border:none;border-radius:14px;background:${isDark?'rgba(255,255,255,0.1)':' rgba(0,0,0,0.07)'};color:${tx};font-size:16px;font-weight:500;cursor:pointer;font-family:inherit;">Cancel</button>
     `;
 
@@ -2609,6 +2631,9 @@ class MeerkatMapCardEditor extends HTMLElement {
           keys.forEach(k => localStorage.removeItem(k));
           localStorage.removeItem('mmPOIElements');
           localStorage.removeItem('mmPOIElementsBounds');
+          // Notify any live card instances on this page so they wipe their
+          // in-memory state and remove POI layers immediately.
+          window.dispatchEvent(new CustomEvent('meerkat-cache-cleared'));
           clearBtn.textContent = `Cleared ${keys.length} entries`;
           if (cacheSizeEl) cacheSizeEl.textContent = 'Cache is empty';
           setTimeout(() => { clearBtn.textContent = 'Clear All Cached POI Data'; }, 2000);
