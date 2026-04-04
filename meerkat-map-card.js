@@ -347,6 +347,7 @@ class MeerkatMapCard extends HTMLElement {
   connectedCallback()    { /* map init happens in set hass */ }
   disconnectedCallback() {
     clearTimeout(this._poiDebounce);
+    if (this._initFetchTimer) { clearTimeout(this._initFetchTimer); this._initFetchTimer = null; }
     this._closeAllOverlays();
     if (this._map) {
       // Save current position, fetch bounds, and in-memory POI elements so we
@@ -635,6 +636,8 @@ class MeerkatMapCard extends HTMLElement {
 
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
+        // Cancel the post-init 3 s fetch timer — the moveend handler takes over.
+        if (this._initFetchTimer) { clearTimeout(this._initFetchTimer); this._initFetchTimer = null; }
         clearTimeout(this._poiDebounce);
         // 2500ms debounce: generous pause so the user can keep scrolling
         // without triggering a fetch on every momentary stop
@@ -706,7 +709,8 @@ class MeerkatMapCard extends HTMLElement {
         const allFetched = enabled.length === 0 ||
           enabled.every(cat => this._isAreaFetched(cat, bs, bw, bn, be));
         if (!allFetched) {
-          setTimeout(() => this._prefetchPOIs(), 600);
+          // Wait 3 s before the first network fetch. Cancel if moveend fires first.
+          this._initFetchTimer = setTimeout(() => { this._initFetchTimer = null; this._prefetchPOIs(); }, 3000);
         }
       });
 
@@ -1722,9 +1726,18 @@ class MeerkatMapCard extends HTMLElement {
       return await Promise.any(proxyUrls.map(tryFetch));
     } catch (e) {
       if (signal && signal.aborted) throw new DOMException('', 'AbortError');
-      // Proxy not installed or all proxy attempts failed — fall back to direct.
-      // Typed errors (rate_limit/busy/timeout) will propagate from the direct
-      // fetch below if all mirrors fail there too.
+      // If the proxy is installed but all mirrors returned a meaningful error
+      // (busy, rate-limited, or all timed out), re-throw immediately — the
+      // direct mirrors are the same servers and will give the same response,
+      // so falling through would just double the wait time for no benefit.
+      const errs = e?.errors || [e];
+      const codes = errs.map(ex => ex?.code).filter(Boolean);
+      const allMeaningful = codes.length > 0 && codes.every(
+        c => c === 'busy' || c === 'rate_limit' || c === 'timeout'
+      );
+      if (allMeaningful) throw e;
+      // Otherwise the proxy is likely not installed or had a network error —
+      // fall back to direct connections (works on desktop; blocked on iOS).
     }
 
     // Fallback: race mirrors directly (works on desktop, blocked on iOS without proxy)
