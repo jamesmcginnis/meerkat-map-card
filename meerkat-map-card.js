@@ -206,6 +206,8 @@ class MeerkatMapCard extends HTMLElement {
       zoom_level:          15,
       distance_unit:       'metric',
       cache_ttl_hours:     48,    // how long POI cache is valid (hours)
+      poi_icon_size:       'medium', // POI marker size: 'small' | 'medium' | 'large'
+      person_icon_size:    'medium', // Person marker size: 'small' | 'medium' | 'large'
       // Food & Drink
       show_restaurants:    false,
       show_cafes:          false,
@@ -652,11 +654,17 @@ class MeerkatMapCard extends HTMLElement {
     const name    = state.attributes?.friendly_name || state.entity_id;
     const isDark  = this._isDark();
 
+    const szMap   = { small: 36, medium: 52, large: 64 };
+    const fsMap   = { small: 13, medium: 18, large: 22 };
+    const sz      = szMap[this._config?.person_icon_size || 'medium'] || 52;
+    const fs      = fsMap[this._config?.person_icon_size || 'medium'] || 18;
+    const half    = sz / 2;
+
     const ringColor  = _mmHex(zoneColor.replace('#',''), 0.35);
     const iconHTML   = `
       <div class="mm-person-marker">
         <style>
-          .mm-person-marker { position:relative; width:52px; height:52px; cursor:pointer; }
+          .mm-person-marker { position:relative; width:${sz}px; height:${sz}px; cursor:pointer; }
           .mm-person-ring {
             position:absolute; inset:-5px; border-radius:50%;
             box-shadow: 0 0 0 0 ${ringColor};
@@ -668,14 +676,14 @@ class MeerkatMapCard extends HTMLElement {
             100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
           }
           .mm-person-circle {
-            width:52px; height:52px; border-radius:50%; overflow:hidden;
+            width:${sz}px; height:${sz}px; border-radius:50%; overflow:hidden;
             border: 3px solid ${zoneColor};
             box-shadow: 0 4px 16px rgba(0,0,0,0.4);
             background: ${isDark ? '#1c1c1e' : '#f0f0f0'};
             display:flex; align-items:center; justify-content:center;
           }
           .mm-person-circle img { width:100%; height:100%; object-fit:cover; }
-          .mm-person-initials { font-size:18px; font-weight:700; color:${zoneColor}; font-family:-apple-system,sans-serif; }
+          .mm-person-initials { font-size:${fs}px; font-weight:700; color:${zoneColor}; font-family:-apple-system,sans-serif; }
 
         </style>
         <div class="mm-person-ring"></div>
@@ -688,7 +696,7 @@ class MeerkatMapCard extends HTMLElement {
 
       </div>`;
 
-    const icon = L.divIcon({ html: iconHTML, className: '', iconSize: [52, 52], iconAnchor: [26, 26] });
+    const icon = L.divIcon({ html: iconHTML, className: '', iconSize: [sz, sz], iconAnchor: [half, half] });
 
     if (this._personMarker) {
       this._personMarker.setLatLng([lat, lng]).setIcon(icon);
@@ -729,8 +737,14 @@ class MeerkatMapCard extends HTMLElement {
       const name      = state.attributes?.friendly_name || entityId;
       const safeId = entityId.replace(/\W/g, '_');
 
+      const fszMap  = { small: 30, medium: 44, large: 54 };
+      const ffsMap  = { small: 11, medium: 16, large: 20 };
+      const fsz     = fszMap[this._config?.person_icon_size || 'medium'] || 44;
+      const ffs     = ffsMap[this._config?.person_icon_size || 'medium'] || 16;
+      const fhalf   = fsz / 2;
+
       const iconHTML = `
-        <div style="position:relative;width:44px;height:44px;cursor:pointer;">
+        <div style="position:relative;width:${fsz}px;height:${fsz}px;cursor:pointer;">
           <style>
             @keyframes mmFamilyPulse_${safeId} {
               0%   { box-shadow: 0 0 0 0 ${zoneColor}55; }
@@ -738,15 +752,15 @@ class MeerkatMapCard extends HTMLElement {
               100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
             }
           </style>
-          <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};box-shadow:0 3px 12px rgba(0,0,0,0.4);background:${isDark ? '#1c1c1e' : '#f0f0f0'};display:flex;align-items:center;justify-content:center;animation:mmFamilyPulse_${safeId} 3s ease-in-out infinite;">
+          <div style="width:${fsz}px;height:${fsz}px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};box-shadow:0 3px 12px rgba(0,0,0,0.4);background:${isDark ? '#1c1c1e' : '#f0f0f0'};display:flex;align-items:center;justify-content:center;animation:mmFamilyPulse_${safeId} 3s ease-in-out infinite;">
             ${picUrl
               ? `<img src="${picUrl}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
-              : `<span style="font-size:16px;font-weight:700;color:${zoneColor};font-family:-apple-system,sans-serif;">${(name[0]||'?').toUpperCase()}</span>`
+              : `<span style="font-size:${ffs}px;font-weight:700;color:${zoneColor};font-family:-apple-system,sans-serif;">${(name[0]||'?').toUpperCase()}</span>`
             }
           </div>
         </div>`;
 
-      const icon = L.divIcon({ html: iconHTML, className: '', iconSize: [44, 44], iconAnchor: [22, 22] });
+      const icon = L.divIcon({ html: iconHTML, className: '', iconSize: [fsz, fsz], iconAnchor: [fhalf, fhalf] });
 
       if (this._familyMarkers[entityId]) {
         this._familyMarkers[entityId].setLatLng([lat, lng]).setIcon(icon);
@@ -1429,24 +1443,30 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // Find the best overlapping cache entry for this category ─────────
+  // Uses a viewport-overlap check rather than a centre-within check so that
+  // panning slightly outside a previously fetched area still hits the cache.
   _poiCacheFallback(cat, s, w, n, e) {
     try {
       const prefix = `mmPOI:${cat.key}:`;
+      let bestTs = 0, bestElements = null;
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith(prefix)) continue;
         const parts = k.slice(prefix.length).split(',');
         if (parts.length !== 4) continue;
         const [cs, cw, cn, ce] = parts.map(Number);
-        const midLat = (s + n) / 2, midLng = (w + e) / 2;
-        if (midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce) {
+        // Accept any cache entry whose bounds overlap with the current viewport
+        if (s <= cn && n >= cs && w <= ce && e >= cw) {
           const raw = localStorage.getItem(k);
           if (raw) {
             const { ts, elements } = JSON.parse(raw);
-            if (Date.now() - ts < this._cacheTTL) return elements;
+            if (Date.now() - ts < this._cacheTTL && ts > bestTs) {
+              bestTs = ts; bestElements = elements;
+            }
           }
         }
       }
+      return bestElements;
     } catch (_) {}
     return null;
   }
@@ -1550,19 +1570,23 @@ class MeerkatMapCard extends HTMLElement {
 
     _renderPOILayer(cat, elements) {
     const L = window.L;
+    const sizeMap = { small: 20, medium: 28, large: 36 };
+    const svgMap  = { small: 10, medium: 14, large: 18 };
+    const sz  = sizeMap[this._config?.poi_icon_size || 'medium'] || 28;
+    const svg = svgMap[this._config?.poi_icon_size  || 'medium'] || 14;
     const iconHTML = `
       <div style="
-        width:28px;height:28px;border-radius:8px;
+        width:${sz}px;height:${sz}px;border-radius:${Math.round(sz * 0.29)}px;
         background:${cat.color};
         display:flex;align-items:center;justify-content:center;
         box-shadow:0 3px 8px rgba(0,0,0,0.4);
         border:2px solid rgba(255,255,255,0.25);
       ">
-        <svg viewBox="0 0 24 24" width="14" height="14">
+        <svg viewBox="0 0 24 24" width="${svg}" height="${svg}">
           <path d="${cat.icon}" fill="white"/>
         </svg>
       </div>`;
-    const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
+    const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [sz, sz], iconAnchor: [sz/2, sz/2] });
 
     const markers = elements
       .map(el => {
@@ -2127,15 +2151,19 @@ class MeerkatMapCardEditor extends HTMLElement {
             <div class="select-row">
               <label>Cache Duration</label>
               <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:8px;line-height:1.4;">
-                How long POI data is kept before being refreshed. POIs like bus stops and hospitals change very rarely — 48 hours is the recommended sweet spot between freshness and speed.
+                How long POI data is kept before it expires. POIs like bus stops and hospitals almost never change — a longer duration means faster loads and fewer network requests. Clear the cache manually if you ever spot outdated information.
               </div>
               <select id="cache_ttl_hours">
-                <option value="6"   ${(cfg.cache_ttl_hours||48)===6   ?'selected':''}>6 hours</option>
-                <option value="12"  ${(cfg.cache_ttl_hours||48)===12  ?'selected':''}>12 hours</option>
-                <option value="24"  ${(cfg.cache_ttl_hours||48)===24  ?'selected':''}>24 hours</option>
-                <option value="48"  ${(cfg.cache_ttl_hours||48)===48  ?'selected':''}>48 hours ⭐ Recommended</option>
-                <option value="72"  ${(cfg.cache_ttl_hours||48)===72  ?'selected':''}>3 days</option>
-                <option value="168" ${(cfg.cache_ttl_hours||48)===168 ?'selected':''}>1 week</option>
+                <option value="6"    ${(cfg.cache_ttl_hours||48)===6    ?'selected':''}>6 hours</option>
+                <option value="12"   ${(cfg.cache_ttl_hours||48)===12   ?'selected':''}>12 hours</option>
+                <option value="24"   ${(cfg.cache_ttl_hours||48)===24   ?'selected':''}>24 hours</option>
+                <option value="48"   ${(cfg.cache_ttl_hours||48)===48   ?'selected':''}>48 hours ⭐ Recommended</option>
+                <option value="72"   ${(cfg.cache_ttl_hours||48)===72   ?'selected':''}>3 days</option>
+                <option value="168"  ${(cfg.cache_ttl_hours||48)===168  ?'selected':''}>1 week</option>
+                <option value="336"  ${(cfg.cache_ttl_hours||48)===336  ?'selected':''}>2 weeks</option>
+                <option value="720"  ${(cfg.cache_ttl_hours||48)===720  ?'selected':''}>1 month</option>
+                <option value="1440" ${(cfg.cache_ttl_hours||48)===1440 ?'selected':''}>2 months</option>
+                <option value="2160" ${(cfg.cache_ttl_hours||48)===2160 ?'selected':''}>3 months</option>
               </select>
             </div>
             <div class="select-row" style="border-top:1px solid var(--divider-color,rgba(0,0,0,0.06));">
@@ -2144,6 +2172,30 @@ class MeerkatMapCardEditor extends HTMLElement {
                 Removes all saved POI data from this device. Useful if you notice outdated information on the map.
               </div>
               <button id="mm-clear-cache-btn" style="padding:10px 16px;border:none;border-radius:10px;background:#FF3B30;color:#fff;font-size:14px;font-weight:600;cursor:pointer;width:100%;font-family:inherit;">Clear All Cached POI Data</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- POI Icon Size -->
+        <div>
+          <div class="section-title">POI Icon Size</div>
+          <div class="card-block" style="padding:12px;">
+            <div class="segmented">
+              <input type="radio" name="poi_icon_size" id="poi_size_small"  value="small"  ${(cfg.poi_icon_size||'medium')==='small'  ? 'checked' : ''}><label for="poi_size_small">Small</label>
+              <input type="radio" name="poi_icon_size" id="poi_size_medium" value="medium" ${(cfg.poi_icon_size||'medium')==='medium' ? 'checked' : ''}><label for="poi_size_medium">Medium</label>
+              <input type="radio" name="poi_icon_size" id="poi_size_large"  value="large"  ${(cfg.poi_icon_size||'medium')==='large'  ? 'checked' : ''}><label for="poi_size_large">Large</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Person Icon Size -->
+        <div>
+          <div class="section-title">Person Icon Size</div>
+          <div class="card-block" style="padding:12px;">
+            <div class="segmented">
+              <input type="radio" name="person_icon_size" id="person_size_small"  value="small"  ${(cfg.person_icon_size||'medium')==='small'  ? 'checked' : ''}><label for="person_size_small">Small</label>
+              <input type="radio" name="person_icon_size" id="person_size_medium" value="medium" ${(cfg.person_icon_size||'medium')==='medium' ? 'checked' : ''}><label for="person_size_medium">Medium</label>
+              <input type="radio" name="person_icon_size" id="person_size_large"  value="large"  ${(cfg.person_icon_size||'medium')==='large'  ? 'checked' : ''}><label for="person_size_large">Large</label>
             </div>
           </div>
         </div>
@@ -2225,9 +2277,15 @@ class MeerkatMapCardEditor extends HTMLElement {
       const avatar     = picUrl
         ? `<img src="${picUrl}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid ${zoneColor};flex-shrink:0;" alt="${name}">`
         : `<div style="width:32px;height:32px;border-radius:50%;background:${zoneColor}22;border:2px solid ${zoneColor};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:${zoneColor};flex-shrink:0;">${(name[0]||'?').toUpperCase()}</div>`;
+      const dragHandle = isSelected
+        ? `<div class="mm-drag-handle" title="Drag to reorder" style="cursor:grab;padding:0 6px 0 2px;color:rgba(128,128,128,0.55);display:flex;align-items:center;flex-shrink:0;touch-action:none;">
+             <svg viewBox="0 0 24 24" width="16" height="16"><path d="M9 20c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" fill="currentColor"/></svg>
+           </div>`
+        : `<div style="width:22px;flex-shrink:0;"></div>`;
 
       return `
-        <div class="toggle-item" style="${i > 0 ? 'border-top:1px solid rgba(128,128,128,0.1);' : ''}">
+        <div class="toggle-item" draggable="${isSelected}" data-drag-entity="${entityId}" style="${i > 0 ? 'border-top:1px solid rgba(128,128,128,0.1);' : ''}transition:opacity 0.15s,border-top 0.1s;">
+          ${dragHandle}
           <div class="toggle-left" style="display:flex;align-items:center;gap:10px;flex:1;">
             ${avatar}
             <div style="flex:1;min-width:0;">
@@ -2253,7 +2311,69 @@ class MeerkatMapCardEditor extends HTMLElement {
           cur = cur.filter(x => x !== id);
         }
         this._updateConfig('family_members', cur);
+        this._buildFamilyList(this.shadowRoot.getElementById('mm-family-search')?.value || '');
       };
+    });
+
+    // Drag-to-reorder — only operates on selected (draggable) rows
+    let dragId = null;
+    let dragOverId = null;
+
+    listEl.querySelectorAll('[data-drag-entity][draggable="true"]').forEach(row => {
+      row.addEventListener('dragstart', e => {
+        dragId = row.dataset.dragEntity;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', dragId);
+        setTimeout(() => { row.style.opacity = '0.45'; }, 0);
+      });
+      row.addEventListener('dragend', () => {
+        row.style.opacity = '';
+        listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
+          r.style.borderTop = '';
+          r.style.borderBottom = '';
+        });
+        dragId = null; dragOverId = null;
+      });
+    });
+
+    listEl.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const row = e.target.closest('[data-drag-entity][draggable="true"]');
+      if (!row || row.dataset.dragEntity === dragId) return;
+      if (row.dataset.dragEntity === dragOverId) return;
+      dragOverId = row.dataset.dragEntity;
+      listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
+        r.style.borderTop = ''; r.style.borderBottom = '';
+      });
+      row.style.borderTop = '2px solid #007AFF';
+    });
+
+    listEl.addEventListener('dragleave', e => {
+      if (!listEl.contains(e.relatedTarget)) {
+        listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
+          r.style.borderTop = ''; r.style.borderBottom = '';
+        });
+        dragOverId = null;
+      }
+    });
+
+    listEl.addEventListener('drop', e => {
+      e.preventDefault();
+      listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
+        r.style.borderTop = ''; r.style.borderBottom = '';
+      });
+      const targetRow = e.target.closest('[data-drag-entity][draggable="true"]');
+      if (!targetRow || !dragId || targetRow.dataset.dragEntity === dragId) return;
+      const targetId = targetRow.dataset.dragEntity;
+      let cur = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
+      const fromIdx = cur.indexOf(dragId);
+      const toIdx   = cur.indexOf(targetId);
+      if (fromIdx === -1 || toIdx === -1) return;
+      cur.splice(fromIdx, 1);
+      cur.splice(toIdx, 0, dragId);
+      this._updateConfig('family_members', cur);
+      this._buildFamilyList(this.shadowRoot.getElementById('mm-family-search')?.value || '');
     });
   }
 
@@ -2267,6 +2387,9 @@ class MeerkatMapCardEditor extends HTMLElement {
     root.getElementById('zoom_level').oninput     = e => this._updateConfig('zoom_level',  parseInt(e.target.value) || 15);
 
     root.querySelectorAll('input[name="theme"]').forEach(r => r.onchange = () => this._updateConfig('theme', r.value));
+
+    root.querySelectorAll('input[name="poi_icon_size"]').forEach(r => r.onchange = () => this._updateConfig('poi_icon_size', r.value));
+    root.querySelectorAll('input[name="person_icon_size"]').forEach(r => r.onchange = () => this._updateConfig('person_icon_size', r.value));
 
     root.querySelectorAll('input[data-key]').forEach(el => {
       el.onchange = () => this._updateConfig(el.dataset.key, el.checked);
@@ -2312,6 +2435,8 @@ class MeerkatMapCardEditor extends HTMLElement {
     if (el('map_height'))      el('map_height').value      = cfg.map_height      || 420;
     if (el('zoom_level'))      el('zoom_level').value      = cfg.zoom_level      || 15;
     root.querySelectorAll('input[name="theme"]').forEach(r => r.checked = r.value === (cfg.theme || 'dark'));
+    root.querySelectorAll('input[name="poi_icon_size"]').forEach(r => r.checked = r.value === (cfg.poi_icon_size || 'medium'));
+    root.querySelectorAll('input[name="person_icon_size"]').forEach(r => r.checked = r.value === (cfg.person_icon_size || 'medium'));
     root.querySelectorAll('input[data-key]').forEach(r => r.checked = !!cfg[r.dataset.key]);
     this._buildFamilyList();
   }
