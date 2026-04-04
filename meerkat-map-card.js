@@ -1525,47 +1525,54 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // ── Multi-strategy Overpass fetcher ───────────────────────────────
+  // Tries each mirror sequentially so that a failure on one always falls
+  // through to the next rather than relying on Promise.any timing.
+  // Proxy mirrors (through HA server) are tried first — same-origin so
+  // iOS never blocks them. Direct mirrors are the fallback for desktop.
   async _fetchOverpass(encodedQ, signal) {
-    // Strategy A: hass-web-proxy-integration (install via HACS, zero config).
-    // Proxies the request through the HA server — same-origin so iOS allows it.
-    // See: https://github.com/dermotduffy/hass-web-proxy-integration
-    const primaryUrl = `https://overpass-api.de/api/interpreter?data=${encodedQ}`;
-    const haProxyUrl = `/api/hass_web_proxy/v0/?url=${encodeURIComponent(primaryUrl)}`;
-
-    const opts = { signal };
     const mirrorUrls = [
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
     ];
-    const tryFetch = url => {
-      const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 20000)
-      );
-      return Promise.race([
-        fetch(url, opts)
-          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-          .then(d => d.elements || []),
-        timeout
-      ]);
+
+    // Per-mirror fetch: own AbortController so a 10s timeout on one mirror
+    // never bleeds into the next attempt.
+    const tryOne = async url => {
+      if (signal?.aborted) throw new DOMException('', 'AbortError');
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 10000);
+      const onParent = () => ac.abort();
+      signal?.addEventListener('abort', onParent, { once: true });
+      try {
+        const r = await fetch(url, { signal: ac.signal });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        return d.elements || [];
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onParent);
+      }
     };
 
-    // Always try the HA proxy first — it works on iOS and is same-origin so
-    // never blocked. We probe lazily (first actual data fetch) rather than
-    // a separate HEAD request, so a network switch never leaves a stale
-    // "proxy unavailable" flag from a failed check during reconnection.
+    const isAbort = e => signal?.aborted || e?.name === 'AbortError';
+
+    // Round 1: proxy mirrors (HA server — same-origin, works on iOS)
     const proxyUrls = mirrorUrls.map(
       u => `/api/hass_web_proxy/v0/?url=${encodeURIComponent(u)}`
     );
-    try {
-      return await Promise.any(proxyUrls.map(tryFetch));
-    } catch (e) {
-      if (signal && signal.aborted) throw new DOMException('', 'AbortError');
-      // Proxy not installed or all proxy attempts failed — fall back to direct
+    for (const url of proxyUrls) {
+      try { return await tryOne(url); }
+      catch (e) { if (isAbort(e)) throw new DOMException('', 'AbortError'); }
     }
 
-    // Fallback: race mirrors directly (works on desktop, blocked on iOS without proxy)
-    return await Promise.any(mirrorUrls.map(tryFetch));
+    // Round 2: direct mirrors (works on desktop; blocked on iOS without proxy)
+    for (const url of mirrorUrls) {
+      try { return await tryOne(url); }
+      catch (e) { if (isAbort(e)) throw new DOMException('', 'AbortError'); }
+    }
+
+    throw new Error('All Overpass mirrors failed');
   }
 
     _renderPOILayer(cat, elements) {
@@ -2315,9 +2322,27 @@ class MeerkatMapCardEditor extends HTMLElement {
       };
     });
 
-    // Drag-to-reorder — only operates on selected (draggable) rows
-    let dragId = null;
-    let dragOverId = null;
+    // ── Shared reorder helper ───────────────────────────────────────
+    const searchVal    = () => this.shadowRoot.getElementById('mm-family-search')?.value || '';
+    const clearHighlights = () => {
+      listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
+        r.style.borderTop = '';
+        r.style.opacity   = '';
+      });
+    };
+    const doReorder = (fromId, toId) => {
+      if (!fromId || !toId || fromId === toId) return;
+      let cur = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
+      const from = cur.indexOf(fromId), to = cur.indexOf(toId);
+      if (from === -1 || to === -1) return;
+      cur.splice(from, 1);
+      cur.splice(to, 0, fromId);
+      this._updateConfig('family_members', cur);
+      this._buildFamilyList(searchVal());
+    };
+
+    // ── Mouse drag (desktop) ────────────────────────────────────────
+    let dragId = null, dragOverId = null;
 
     listEl.querySelectorAll('[data-drag-entity][draggable="true"]').forEach(row => {
       row.addEventListener('dragstart', e => {
@@ -2326,54 +2351,97 @@ class MeerkatMapCardEditor extends HTMLElement {
         e.dataTransfer.setData('text/plain', dragId);
         setTimeout(() => { row.style.opacity = '0.45'; }, 0);
       });
-      row.addEventListener('dragend', () => {
-        row.style.opacity = '';
-        listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
-          r.style.borderTop = '';
-          r.style.borderBottom = '';
-        });
-        dragId = null; dragOverId = null;
-      });
+      row.addEventListener('dragend', () => { clearHighlights(); dragId = null; dragOverId = null; });
     });
 
     listEl.addEventListener('dragover', e => {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       const row = e.target.closest('[data-drag-entity][draggable="true"]');
-      if (!row || row.dataset.dragEntity === dragId) return;
-      if (row.dataset.dragEntity === dragOverId) return;
+      if (!row || row.dataset.dragEntity === dragId || row.dataset.dragEntity === dragOverId) return;
       dragOverId = row.dataset.dragEntity;
-      listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
-        r.style.borderTop = ''; r.style.borderBottom = '';
-      });
+      listEl.querySelectorAll('[data-drag-entity]').forEach(r => { r.style.borderTop = ''; });
       row.style.borderTop = '2px solid #007AFF';
     });
 
     listEl.addEventListener('dragleave', e => {
       if (!listEl.contains(e.relatedTarget)) {
-        listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
-          r.style.borderTop = ''; r.style.borderBottom = '';
-        });
+        listEl.querySelectorAll('[data-drag-entity]').forEach(r => { r.style.borderTop = ''; });
         dragOverId = null;
       }
     });
 
     listEl.addEventListener('drop', e => {
       e.preventDefault();
-      listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
-        r.style.borderTop = ''; r.style.borderBottom = '';
-      });
       const targetRow = e.target.closest('[data-drag-entity][draggable="true"]');
-      if (!targetRow || !dragId || targetRow.dataset.dragEntity === dragId) return;
-      const targetId = targetRow.dataset.dragEntity;
-      let cur = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
-      const fromIdx = cur.indexOf(dragId);
-      const toIdx   = cur.indexOf(targetId);
-      if (fromIdx === -1 || toIdx === -1) return;
-      cur.splice(fromIdx, 1);
-      cur.splice(toIdx, 0, dragId);
-      this._updateConfig('family_members', cur);
-      this._buildFamilyList(this.shadowRoot.getElementById('mm-family-search')?.value || '');
+      clearHighlights();
+      doReorder(dragId, targetRow?.dataset.dragEntity);
+    });
+
+    // ── Touch drag (iOS / mobile) ───────────────────────────────────
+    // HTML5 drag-and-drop is not supported on iOS Safari, so we implement
+    // reordering with touch events attached to each drag handle.
+    let tId = null, tOverId = null, tClone = null;
+    let tStartY = 0, tCloneTop = 0, tActive = false;
+
+    listEl.querySelectorAll('.mm-drag-handle').forEach(handle => {
+      const row = handle.closest('[data-drag-entity]');
+      if (!row || row.getAttribute('draggable') !== 'true') return;
+
+      handle.addEventListener('touchstart', e => {
+        tId     = row.dataset.dragEntity;
+        tStartY = e.touches[0].clientY;
+        tActive = false;
+        tOverId = null;
+      }, { passive: true });
+
+      handle.addEventListener('touchmove', e => {
+        if (!tId) return;
+        const dy     = e.touches[0].clientY - tStartY;
+        const touchY = e.touches[0].clientY;
+
+        // Activate drag once the finger moves more than 5px vertically
+        if (!tActive && Math.abs(dy) > 5) {
+          tActive = true;
+          const rect = row.getBoundingClientRect();
+          tCloneTop  = rect.top;
+          tClone     = row.cloneNode(true);
+          Object.assign(tClone.style, {
+            position: 'fixed', left: rect.left + 'px', top: rect.top + 'px',
+            width: rect.width + 'px', zIndex: '9999', opacity: '0.88',
+            pointerEvents: 'none', borderRadius: '10px',
+            background: 'rgba(0,122,255,0.09)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.3)', transition: 'none',
+          });
+          // Append to shadow root so shadow CSS (toggle-track etc.) applies
+          this.shadowRoot.appendChild(tClone);
+          row.style.opacity = '0.4';
+        }
+
+        if (!tActive) return;
+        e.preventDefault(); // block list scroll while dragging
+
+        if (tClone) tClone.style.top = (tCloneTop + dy) + 'px';
+
+        // Highlight whichever row the finger is currently over
+        listEl.querySelectorAll('[data-drag-entity]').forEach(r => { r.style.borderTop = ''; });
+        tOverId = null;
+        listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
+          if (r.dataset.dragEntity === tId) return;
+          const rect = r.getBoundingClientRect();
+          if (touchY >= rect.top && touchY < rect.bottom) {
+            r.style.borderTop = '2px solid #007AFF';
+            tOverId = r.dataset.dragEntity;
+          }
+        });
+      }, { passive: false });
+
+      handle.addEventListener('touchend', () => {
+        if (tClone) { tClone.remove(); tClone = null; }
+        clearHighlights();
+        if (tActive && tOverId) doReorder(tId, tOverId);
+        tId = null; tOverId = null; tActive = false;
+      });
     });
   }
 
