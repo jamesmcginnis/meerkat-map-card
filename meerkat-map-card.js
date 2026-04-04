@@ -192,6 +192,8 @@ class MeerkatMapCard extends HTMLElement {
     this._poiFetching = {};
     this._poiElements = {}; // in-memory element cache for fast reconnect
     this._poiElementsBounds = null; // bounds at the time _poiElements was captured
+    // Global accumulator: catKey → { osmId: element } — survives pans & zooms
+    this._poiAllElements = {};
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -1307,6 +1309,20 @@ class MeerkatMapCard extends HTMLElement {
     const enabled = MM_POIS.filter(c => this._config[c.key]);
     if (!enabled.length) return;
 
+    // Pre-render: for any enabled category that has accumulated elements but
+    // no current layer (e.g. category just toggled on, or layer was removed),
+    // render from the global accumulator immediately so markers appear while
+    // the network fetch (if needed) is in flight.
+    if (this._poiAllElements) {
+      for (const cat of enabled) {
+        if (!this._poiLayers[cat.key] &&
+            this._poiAllElements[cat.key] &&
+            Object.keys(this._poiAllElements[cat.key]).length > 0) {
+          this._renderPOILayer(cat, []); // empty → just renders accumulator
+        }
+      }
+    }
+
     // Update last fetch bounds (used by moveend to skip redundant reloads)
     this._lastFetchBounds = { s, w, n, e };
 
@@ -1434,10 +1450,31 @@ class MeerkatMapCard extends HTMLElement {
   // appear instantly rather than waiting for the Overpass response.
   _restorePOIsFromCache() {
     if (!this._mapInitialised || !this._map) return;
+
+    // Load global accumulator from localStorage for any category not yet in memory
+    if (!this._poiAllElements) this._poiAllElements = {};
+    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+    for (const cat of enabled) {
+      if (!this._poiAllElements[cat.key] || Object.keys(this._poiAllElements[cat.key]).length === 0) {
+        try {
+          const raw = localStorage.getItem(`mmPOIAll:${cat.key}`);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            this._poiAllElements[cat.key] = {};
+            for (const el of arr) {
+              const eid = el.id != null
+                ? String(el.id)
+                : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
+              if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
     const b = this._map.getBounds();
     const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
     const midLat = (s + n) / 2, midLng = (w + e) / 2;
-    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
 
     // Check if _poiElements was captured at a location that covers the current
     // map centre. Only use it if it does — avoids serving the wrong town's data.
@@ -1449,7 +1486,14 @@ class MeerkatMapCard extends HTMLElement {
     for (const cat of enabled) {
       if (this._poiLayers[cat.key]) continue; // already rendered
 
-      // Priority 1: in-memory elements — only if they are for this location
+      // Priority 1: global accumulator (location-independent — always correct)
+      if (this._poiAllElements[cat.key] &&
+          Object.keys(this._poiAllElements[cat.key]).length > 0) {
+        this._renderPOILayer(cat, []);
+        continue;
+      }
+
+      // Priority 2: legacy in-memory elements — only if for this location
       if (memMatchesLocation &&
           this._poiElements &&
           Object.prototype.hasOwnProperty.call(this._poiElements, cat.key)) {
@@ -1457,7 +1501,7 @@ class MeerkatMapCard extends HTMLElement {
         continue;
       }
 
-      // Priority 2: localStorage exact key
+      // Priority 3: localStorage exact key
       let elements = null;
       try {
         const raw = localStorage.getItem(this._poiCacheKey(cat, s, w, n, e));
@@ -1467,7 +1511,7 @@ class MeerkatMapCard extends HTMLElement {
         }
       } catch (_) {}
 
-      // Priority 3: nearby localStorage fallback
+      // Priority 4: nearby localStorage fallback
       if (elements === null) elements = this._poiCacheFallback(cat, s, w, n, e);
 
       if (elements !== null) this._renderPOILayer(cat, elements);
@@ -1616,6 +1660,29 @@ class MeerkatMapCard extends HTMLElement {
 
     _renderPOILayer(cat, elements) {
     const L = window.L;
+
+    // ── Merge new elements into the global accumulator ─────────────
+    // The accumulator (keyed by OSM id) persists across pans and zooms so
+    // that previously fetched POIs are never lost when the viewport moves.
+    if (!this._poiAllElements) this._poiAllElements = {};
+    if (!this._poiAllElements[cat.key]) this._poiAllElements[cat.key] = {};
+    for (const el of elements) {
+      // Use OSM id when available; fall back to a lat/lon string so that
+      // elements without an id (rare but possible) are still stored.
+      const eid = el.id != null
+        ? String(el.id)
+        : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
+      if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
+    }
+    // Persist global store so it survives a full app close/reopen
+    try {
+      localStorage.setItem(
+        `mmPOIAll:${cat.key}`,
+        JSON.stringify(Object.values(this._poiAllElements[cat.key]))
+      );
+    } catch (_) {}
+
+    // ── Build markers from ALL accumulated elements ─────────────────
     const sizeMap = { small: 20, medium: 28, large: 36 };
     const svgMap  = { small: 10, medium: 14, large: 18 };
     const sz  = sizeMap[this._config?.poi_icon_size || 'medium'] || 28;
@@ -1634,7 +1701,8 @@ class MeerkatMapCard extends HTMLElement {
       </div>`;
     const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [sz, sz], iconAnchor: [sz/2, sz/2] });
 
-    const markers = elements
+    const allElements = Object.values(this._poiAllElements[cat.key]);
+    const markers = allElements
       .map(el => {
         var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
         var lon = el.lon != null ? el.lon : (el.center ? el.center.lon : null);
@@ -1659,15 +1727,11 @@ class MeerkatMapCard extends HTMLElement {
     const newLayer = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
     if (this._poiLayers[cat.key]) this._map.removeLayer(this._poiLayers[cat.key]);
     this._poiLayers[cat.key] = newLayer;
-    // Keep a copy of raw elements in memory so we can re-render on reconnect
-    // without depending on localStorage (which can be unreliable on iOS
-    // during a WiFi→4G network switch).
+
+    // Legacy reconnect cache — keep in sync for WiFi→4G fast restore
     if (!this._poiElements) this._poiElements = {};
-    this._poiElements[cat.key] = elements;
-    // Store the bounds this data was fetched for so restore can
-    // validate it belongs to the current location before using it
+    this._poiElements[cat.key] = allElements;
     if (this._lastFetchBounds) this._poiElementsBounds = this._lastFetchBounds;
-    // Keep localStorage in sync so navigate-away/reopen restores immediately
     try { localStorage.setItem('mmPOIElements', JSON.stringify(this._poiElements)); } catch (_) {}
     try { localStorage.setItem('mmPOIElementsBounds', JSON.stringify(this._poiElementsBounds)); } catch (_) {}
   }
@@ -1904,12 +1968,12 @@ class MeerkatMapCard extends HTMLElement {
 
     panel.innerHTML = `
       <div style="font-size:36px;margin-bottom:14px;">🔄</div>
-      <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:10px;">Reload Points of Interest?</div>
+      <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:10px;">Refresh Points of Interest?</div>
       <div style="font-size:14px;color:${sub};line-height:1.5;margin-bottom:24px;">
-        This will clear the saved map data for this area and download fresh information from OpenStreetMap.
+        This will clear all cached POI data and download fresh information from OpenStreetMap.
         It may take a moment to load, especially on mobile.
       </div>
-      <button id="mm-confirm-yes" style="width:100%;padding:14px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;font-family:inherit;">Reload Data</button>
+      <button id="mm-confirm-yes" style="width:100%;padding:14px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;font-family:inherit;">Clear Cache &amp; Reload</button>
       <button id="mm-confirm-no"  style="width:100%;padding:14px;border:none;border-radius:14px;background:${isDark?'rgba(255,255,255,0.1)':' rgba(0,0,0,0.07)'};color:${tx};font-size:16px;font-weight:500;cursor:pointer;font-family:inherit;">Cancel</button>
     `;
 
@@ -1932,37 +1996,19 @@ class MeerkatMapCard extends HTMLElement {
     this._poiElements = {};  // clear in-memory cache so stale data cannot be restored
     this._poiElementsBounds = null;
     this._lastFetchBounds = null; // bypass bounds check
+    this._poiAllElements = {}; // clear global accumulator
 
-    // Also clear the localStorage snapshot so a reopen doesn't restore stale data
-    try { localStorage.removeItem('mmPOIElements'); } catch (_) {}
-    try { localStorage.removeItem('mmPOIElementsBounds'); } catch (_) {}
-
-    // Clear localStorage cache for all enabled categories at current bounds
-    // so fresh data is fetched rather than served from cache
-    if (this._mapInitialised && this._map) {
-      const b = this._map.getBounds();
-      const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
-      try {
-        const prefix = 'mmPOI:';
-        const keys = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith(prefix)) keys.push(k);
-        }
-        const midLat = (s + n) / 2, midLng = (w + e) / 2;
-        keys.forEach(k => {
-          const parts = k.split(':');
-          if (parts.length < 3) return;
-          const coords = parts[2].split(',').map(Number);
-          if (coords.length === 4) {
-            const [cs, cw, cn, ce] = coords;
-            if (midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce) {
-              localStorage.removeItem(k);
-            }
-          }
-        });
-      } catch (_) {}
-    }
+    // Clear localStorage — all POI cache entries (bounds-based and global)
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:'))) keys.push(k);
+      }
+      keys.forEach(k => localStorage.removeItem(k));
+      localStorage.removeItem('mmPOIElements');
+      localStorage.removeItem('mmPOIElementsBounds');
+    } catch (_) {}
 
     this._loadAllPOIs();
   }
@@ -2225,6 +2271,7 @@ class MeerkatMapCardEditor extends HTMLElement {
                 Removes all saved POI data from this device. Useful if you notice outdated information on the map.
               </div>
               <button id="mm-clear-cache-btn" style="padding:10px 16px;border:none;border-radius:10px;background:#FF3B30;color:#fff;font-size:14px;font-weight:600;cursor:pointer;width:100%;font-family:inherit;">Clear All Cached POI Data</button>
+              <div id="mm-cache-size" style="margin-top:8px;font-size:12px;color:var(--secondary-text-color);text-align:center;min-height:16px;"></div>
             </div>
           </div>
         </div>
@@ -2454,19 +2501,47 @@ class MeerkatMapCardEditor extends HTMLElement {
     if (ttlSel) ttlSel.onchange = e => this._updateConfig('cache_ttl_hours', parseInt(e.target.value));
 
     const clearBtn = root.getElementById('mm-clear-cache-btn');
+    const cacheSizeEl = root.getElementById('mm-cache-size');
+
+    // Helper: compute total POI cache size in localStorage
+    const _computeCacheSize = () => {
+      try {
+        let bytes = 0;
+        let entries = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') ||
+              k === 'mmPOIElements' || k === 'mmPOIElementsBounds')) {
+            const v = localStorage.getItem(k) || '';
+            bytes += (k.length + v.length) * 2; // UTF-16 chars = 2 bytes each
+            entries++;
+          }
+        }
+        if (entries === 0) return 'Cache is empty';
+        const kb = bytes / 1024;
+        const sizeStr = kb < 1024
+          ? `${kb.toFixed(1)} KB`
+          : `${(kb / 1024).toFixed(2)} MB`;
+        return `Cache: ${sizeStr} across ${entries} stored region${entries !== 1 ? 's' : ''}`;
+      } catch (_) { return ''; }
+    };
+
+    // Populate size on load
+    if (cacheSizeEl) cacheSizeEl.textContent = _computeCacheSize();
+
     if (clearBtn) clearBtn.onclick = () => {
       if (confirm('Clear all saved POI data from this device?')) {
         try {
           const keys = [];
           for (let i = 0; i < localStorage.length; i++) {
             const k = localStorage.key(i);
-            if (k && k.startsWith('mmPOI:')) keys.push(k);
+            if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:'))) keys.push(k);
           }
           keys.forEach(k => localStorage.removeItem(k));
           localStorage.removeItem('mmPOIElements');
           localStorage.removeItem('mmPOIElementsBounds');
-          localStorage.removeItem('mmMapPos');
           clearBtn.textContent = `Cleared ${keys.length} entries`;
+          if (cacheSizeEl) cacheSizeEl.textContent = 'Cache is empty';
           setTimeout(() => { clearBtn.textContent = 'Clear All Cached POI Data'; }, 2000);
         } catch (_) {}
       }
