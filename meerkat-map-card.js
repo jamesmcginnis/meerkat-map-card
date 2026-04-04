@@ -1830,7 +1830,14 @@ class MeerkatMapCard extends HTMLElement {
       const phoneRow = document.createElement('div');
       phoneRow.className = 'mm-info-row';
       phoneRow.innerHTML = `<span class="mm-info-label">Phone</span>`
-        + `<span class="mm-info-value"><a href="tel:${phone}" style="color:${bestCat.color};text-decoration:none;font-weight:600;" onclick="event.preventDefault();if(confirm('Call ${phone}?'))window.location.href='tel:${phone}'">${phone}</a></span>`;
+        + `<span class="mm-info-value"><a href="tel:${phone}" style="color:${bestCat.color};text-decoration:none;font-weight:600;">${phone}</a></span>`;
+      // Intercept tap — show a friendly styled confirmation sheet instead of the
+      // browser's plain confirm() dialog, which looks out of place on mobile.
+      const phoneLink = phoneRow.querySelector('a');
+      phoneLink.addEventListener('click', e => {
+        e.preventDefault();
+        this._confirmPhoneCall(phone, name, bestCat.color);
+      });
       infoWrap.appendChild(phoneRow);
     }
     if (tags.website || tags['contact:website']) addRow('Website', tags.website || tags['contact:website'], true);
@@ -1868,6 +1875,68 @@ class MeerkatMapCard extends HTMLElement {
       this._activeOverlay.remove();
       this._activeOverlay = null;
     }
+  }
+
+  // ── Phone call confirmation sheet ─────────────────────────────────
+  _confirmPhoneCall(phone, placeName, accentColor) {
+    const isDark  = this._isDark();
+    const bg      = isDark ? 'rgba(28,28,30,0.97)' : 'rgba(252,252,254,0.98)';
+    const tx      = isDark ? '#fff' : '#000';
+    const sub     = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)';
+    const bd      = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)';
+    const accent  = accentColor || '#007AFF';
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = [
+      'position:fixed;inset:0;z-index:999999',
+      'display:flex;align-items:flex-end;justify-content:center;padding:0 0 24px',
+      'background:rgba(0,0,0,0.5)',
+      'backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)',
+      'animation:mmFadeIn 0.2s ease',
+    ].join(';');
+
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `@keyframes mmFadeIn{from{opacity:0}to{opacity:1}}@keyframes mmSlideUp{from{transform:translateY(24px) scale(0.97);opacity:0}to{transform:none;opacity:1}}`;
+    overlay.appendChild(styleEl);
+
+    const panel = document.createElement('div');
+    panel.style.cssText = [
+      `background:${bg}`,
+      'backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%)',
+      `border:1px solid ${bd}`,
+      'border-radius:24px',
+      'padding:28px 24px 20px',
+      'width:calc(100% - 32px);max-width:380px',
+      `font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;color:${tx}`,
+      'animation:mmSlideUp 0.28s cubic-bezier(0.34,1.3,0.64,1)',
+      'text-align:center',
+    ].join(';');
+
+    panel.innerHTML = `
+      <div style="font-size:40px;margin-bottom:12px;">📞</div>
+      <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:6px;">${placeName}</div>
+      <div style="font-size:22px;font-weight:600;color:${accent};margin-bottom:6px;letter-spacing:0.5px;">${phone}</div>
+      <div style="font-size:13px;color:${sub};margin-bottom:24px;">Call this number?</div>
+      <a href="tel:${phone}" id="mm-call-yes"
+        style="display:block;width:100%;padding:14px;border:none;border-radius:14px;background:${accent};color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;font-family:inherit;text-decoration:none;box-sizing:border-box;">
+        Call
+      </a>
+      <button id="mm-call-no"
+        style="display:block;width:100%;padding:14px;border:none;border-radius:14px;background:${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)'};color:${tx};font-size:16px;font-weight:500;cursor:pointer;font-family:inherit;">
+        Cancel
+      </button>
+    `;
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    panel.querySelector('#mm-call-no').addEventListener('click', close);
+    // The <a> tag handles the actual tel: navigation natively; just close the sheet after.
+    panel.querySelector('#mm-call-yes').addEventListener('click', () => {
+      setTimeout(close, 300);
+    });
   }
 
   // ── POI loading ring ─────────────────────────────────────────────
@@ -1970,7 +2039,7 @@ class MeerkatMapCard extends HTMLElement {
       <div style="font-size:36px;margin-bottom:14px;">🔄</div>
       <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:10px;">Refresh Points of Interest?</div>
       <div style="font-size:14px;color:${sub};line-height:1.5;margin-bottom:24px;">
-        This will clear all cached POI data and download fresh information from OpenStreetMap.
+        This will refetch data and download fresh information from OpenStreetMap.
         It may take a moment to load, especially on mobile.
       </div>
       <button id="mm-confirm-yes" style="width:100%;padding:14px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;font-family:inherit;">Clear Cache &amp; Reload</button>
