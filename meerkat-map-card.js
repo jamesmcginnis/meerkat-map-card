@@ -281,6 +281,10 @@ class MeerkatMapCard extends HTMLElement {
   setConfig(config) {
     const prev = this._config || {};
     this._config = { ...MeerkatMapCard.getStubConfig(), ...config };
+    // Pre-warm the in-memory caches from localStorage as early as possible
+    // so that when the map initialises, _restorePOIsFromCache can render
+    // markers immediately without any additional localStorage reads.
+    this._warmCacheFromStorage();
     if (this._mapInitialised) {
       this._applyTheme();
       this._updateMap();
@@ -292,6 +296,42 @@ class MeerkatMapCard extends HTMLElement {
         }
       }
       this._loadAllPOIs();
+    }
+  }
+
+  // ── Cache warm-up ─────────────────────────────────────────────────
+  // Reads mmPOIAll: (element data) and mmPOIFetched: (region records) from
+  // localStorage into memory for every currently enabled category.
+  // Called from setConfig so the data is ready before the map initialises.
+  _warmCacheFromStorage() {
+    if (!this._poiAllElements) this._poiAllElements = {};
+    if (!this._fetchedRegions)  this._fetchedRegions  = {};
+    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+    for (const cat of enabled) {
+      // Accumulator — skip if already in memory
+      if (!this._poiAllElements[cat.key] ||
+          Object.keys(this._poiAllElements[cat.key]).length === 0) {
+        try {
+          const raw = localStorage.getItem(`mmPOIAll:${cat.key}`);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            this._poiAllElements[cat.key] = {};
+            for (const el of arr) {
+              const eid = el.id != null
+                ? String(el.id)
+                : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
+              if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
+            }
+          }
+        } catch (_) {}
+      }
+      // Fetched-region index — skip if already in memory
+      if (!this._fetchedRegions[cat.key]) {
+        try {
+          const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
+          if (raw) this._fetchedRegions[cat.key] = JSON.parse(raw);
+        } catch (_) {}
+      }
     }
   }
 
@@ -623,19 +663,9 @@ class MeerkatMapCard extends HTMLElement {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
 
-        // Restore legacy snapshot (bounds only — position is always person-centred)
-        if (!this._poiElements || Object.keys(this._poiElements).length === 0) {
-          try {
-            const savedEls    = localStorage.getItem('mmPOIElements');
-            const savedBounds = localStorage.getItem('mmPOIElementsBounds');
-            if (savedEls)    this._poiElements       = JSON.parse(savedEls);
-            if (savedBounds) this._poiElementsBounds = JSON.parse(savedBounds);
-          } catch (_) {}
-        }
-
-        // Re-render POI layers from the global accumulator immediately.
-        // _restorePOIsFromCache loads mmPOIAll: keys into _poiAllElements and
-        // renders them — this is the primary path after a full app close/reopen.
+        // Render all cached POI layers immediately from the in-memory accumulator.
+        // _warmCacheFromStorage (called from setConfig) has already loaded all
+        // mmPOIAll: data from localStorage, so this is a pure Leaflet render.
         this._restorePOIsFromCache();
 
         // Only trigger a network prefetch if at least one enabled category
@@ -1419,76 +1449,19 @@ class MeerkatMapCard extends HTMLElement {
     await this._loadAllPOIs(s, w, n, e);
   }
 
-  // Re-render all enabled POI layers from cache immediately after map rebuild.
-  // Called on reconnect (WiFi→4G etc.) before any network fetch so markers
-  // appear instantly rather than waiting for the Overpass response.
+  // Re-render all enabled POI layers from the in-memory accumulator immediately.
+  // _warmCacheFromStorage has already loaded mmPOIAll: from localStorage so this
+  // is a pure Leaflet render with no blocking I/O.
   _restorePOIsFromCache() {
     if (!this._mapInitialised || !this._map) return;
-
-    // Load global accumulator from localStorage for any category not yet in memory
     if (!this._poiAllElements) this._poiAllElements = {};
     const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
     for (const cat of enabled) {
-      if (!this._poiAllElements[cat.key] || Object.keys(this._poiAllElements[cat.key]).length === 0) {
-        try {
-          const raw = localStorage.getItem(`mmPOIAll:${cat.key}`);
-          if (raw) {
-            const arr = JSON.parse(raw);
-            this._poiAllElements[cat.key] = {};
-            for (const el of arr) {
-              const eid = el.id != null
-                ? String(el.id)
-                : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
-              if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
-            }
-          }
-        } catch (_) {}
-      }
-    }
-
-    const b = this._map.getBounds();
-    const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
-    const midLat = (s + n) / 2, midLng = (w + e) / 2;
-
-    // Check if _poiElements was captured at a location that covers the current
-    // map centre. Only use it if it does — avoids serving the wrong town's data.
-    const eb = this._poiElementsBounds;
-    const memMatchesLocation = eb &&
-      midLat >= eb.s && midLat <= eb.n &&
-      midLng >= eb.w && midLng <= eb.e;
-
-    for (const cat of enabled) {
       if (this._poiLayers[cat.key]) continue; // already rendered
-
-      // Priority 1: global accumulator (location-independent — always correct)
       if (this._poiAllElements[cat.key] &&
           Object.keys(this._poiAllElements[cat.key]).length > 0) {
         this._renderPOILayer(cat, []);
-        continue;
       }
-
-      // Priority 2: legacy in-memory elements — only if for this location
-      if (memMatchesLocation &&
-          this._poiElements &&
-          Object.prototype.hasOwnProperty.call(this._poiElements, cat.key)) {
-        this._renderPOILayer(cat, this._poiElements[cat.key]);
-        continue;
-      }
-
-      // Priority 3: localStorage exact key
-      let elements = null;
-      try {
-        const raw = localStorage.getItem(this._poiCacheKey(cat, s, w, n, e));
-        if (raw) {
-          const { ts, elements: els } = JSON.parse(raw);
-          if (Date.now() - ts < this._cacheTTL) elements = els;
-        }
-      } catch (_) {}
-
-      // Priority 4: nearby localStorage fallback
-      if (elements === null) elements = this._poiCacheFallback(cat, s, w, n, e);
-
-      if (elements !== null) this._renderPOILayer(cat, elements);
     }
   }
 
@@ -1540,37 +1513,42 @@ class MeerkatMapCard extends HTMLElement {
   // this area?" signal. The actual data lives in the accumulator.
 
   _isAreaFetched(cat, s, w, n, e) {
-    // A category with an empty accumulator must always be fetched.
+    // Must have accumulator data before we can consider an area "fetched"
     if (!this._poiAllElements?.[cat.key] ||
         Object.keys(this._poiAllElements[cat.key]).length === 0) return false;
 
-    const midLat = (s + n) / 2, midLng = (w + e) / 2;
-    const ttl    = this._cacheTTL;
-    const nowMs  = Date.now();
+    const ttl      = this._cacheTTL;
+    const nowMs    = Date.now();
+    const viewArea = (n - s) * (e - w);
 
-    // In-memory fast path
-    const mem = this._fetchedRegions?.[cat.key];
-    if (mem) {
-      for (const r of mem) {
-        if (nowMs - r.ts < ttl &&
-            midLat >= r.s && midLat <= r.n &&
-            midLng >= r.w && midLng <= r.e) return true;
+    // Returns true if a single stored region covers ≥50% of the requested viewport.
+    // This is far more robust than midpoint containment — the user can pan up to
+    // half a viewport distance in any direction without triggering a redundant fetch.
+    const coversView = (regions) => {
+      if (!regions) return false;
+      for (const r of regions) {
+        if (nowMs - r.ts >= ttl) continue;
+        const oS = Math.max(r.s, s), oN = Math.min(r.n, n);
+        const oW = Math.max(r.w, w), oE = Math.min(r.e, e);
+        if (oN <= oS || oE <= oW) continue; // no overlap
+        if (viewArea <= 0) return true;
+        if (((oN - oS) * (oE - oW)) / viewArea >= 0.5) return true;
       }
-    }
+      return false;
+    };
 
-    // localStorage fallback (warms the in-memory cache on hit)
+    // Fast path: check in-memory regions first
+    if (coversView(this._fetchedRegions?.[cat.key])) return true;
+
+    // Fallback: check localStorage and warm the in-memory cache on hit
     try {
       const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
       if (!raw) return false;
       const stored = JSON.parse(raw);
-      for (const r of stored) {
-        if (nowMs - r.ts < ttl &&
-            midLat >= r.s && midLat <= r.n &&
-            midLng >= r.w && midLng <= r.e) {
-          if (!this._fetchedRegions) this._fetchedRegions = {};
-          this._fetchedRegions[cat.key] = stored;
-          return true;
-        }
+      if (coversView(stored)) {
+        if (!this._fetchedRegions) this._fetchedRegions = {};
+        this._fetchedRegions[cat.key] = stored;
+        return true;
       }
     } catch (_) {}
     return false;
