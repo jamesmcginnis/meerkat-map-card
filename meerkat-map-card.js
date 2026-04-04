@@ -304,14 +304,24 @@ class MeerkatMapCard extends HTMLElement {
     clearTimeout(this._poiDebounce);
     this._closeAllOverlays();
     if (this._map) {
-      // Save current position and fetch bounds so we can restore them on reconnect.
-      // This prevents a spurious reload when switching WiFi↔4G causes a reconnect.
+      // Save current position, fetch bounds, and in-memory POI elements so we
+      // can restore them on reconnect without hitting the network again.
       try {
         const c = this._map.getCenter();
         const z = this._map.getZoom();
         const payload = { lat: c.lat, lng: c.lng, zoom: z };
         if (this._lastFetchBounds) payload.bounds = this._lastFetchBounds;
         sessionStorage.setItem('mmMapPos', JSON.stringify(payload));
+      } catch (_) {}
+      // Persist in-memory POI elements to sessionStorage so they survive
+      // navigate-away / app-reopen without needing a network fetch.
+      try {
+        if (this._poiElements && Object.keys(this._poiElements).length > 0) {
+          sessionStorage.setItem('mmPOIElements', JSON.stringify(this._poiElements));
+        }
+        if (this._poiElementsBounds) {
+          sessionStorage.setItem('mmPOIElementsBounds', JSON.stringify(this._poiElementsBounds));
+        }
       } catch (_) {}
       this._map.remove();
       this._map          = null;
@@ -583,6 +593,18 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
+
+        // Restore in-memory POI elements from sessionStorage if present.
+        // This covers navigate-away/return and app reopen without any network hit.
+        if (!this._poiElements || Object.keys(this._poiElements).length === 0) {
+          try {
+            const savedEls = sessionStorage.getItem('mmPOIElements');
+            const savedBounds = sessionStorage.getItem('mmPOIElementsBounds');
+            if (savedEls) this._poiElements = JSON.parse(savedEls);
+            if (savedBounds) this._poiElementsBounds = JSON.parse(savedBounds);
+          } catch (_) {}
+        }
+
         // Re-render POI layers from in-memory cache immediately
         this._restorePOIsFromCache();
         // Only prefetch if we have no in-memory data (first load or forced refresh)
@@ -1364,11 +1386,22 @@ class MeerkatMapCard extends HTMLElement {
     const b   = this._map.getBounds();
     const vs  = b.getSouth(), vw = b.getWest(), vn = b.getNorth(), ve = b.getEast();
 
+    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+
+    // If in-memory elements (restored from sessionStorage) already cover this
+    // location, just render them — no network request needed.
+    const eb = this._poiElementsBounds;
+    const midLat = (vs + vn) / 2, midLng = (vw + ve) / 2;
+    if (eb && this._poiElements && Object.keys(this._poiElements).length > 0 &&
+        midLat >= eb.s && midLat <= eb.n && midLng >= eb.w && midLng <= eb.e) {
+      this._loadAllPOIs(vs, vw, vn, ve);
+      return;
+    }
+
     // If fetch bounds were restored from a previous session at this same location,
     // render from cache directly — no allCached scan needed.
     // The moveend handler will have already skipped the reload if bounds match,
     // but _prefetchPOIs is called on init before moveend fires.
-    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
     const allCached = enabled.length > 0 && enabled.every(cat => {
       try {
         const key = this._poiCacheKey(cat, vs, vw, vn, ve);
@@ -1450,21 +1483,36 @@ class MeerkatMapCard extends HTMLElement {
   _poiCacheFallback(cat, s, w, n, e) {
     try {
       const prefix = `mmPOI:${cat.key}:`;
+      const ttl = this._cacheTTL;
+      let bestElements = null;
+      let bestOverlap = 0;
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith(prefix)) continue;
         const parts = k.slice(prefix.length).split(',');
         if (parts.length !== 4) continue;
         const [cs, cw, cn, ce] = parts.map(Number);
+        // Use overlap check instead of mid-point: cached bounds must overlap the
+        // requested bounds AND cover the mid-point of the requested area.
         const midLat = (s + n) / 2, midLng = (w + e) / 2;
-        if (midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
+        const overlaps = cs <= n && cn >= s && cw <= e && ce >= w;
+        const coversMid = midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce;
+        if (!overlaps || !coversMid) continue;
+        // Pick the entry with the largest overlap area
+        const overlapArea = (Math.min(cn, n) - Math.max(cs, s)) * (Math.min(ce, e) - Math.max(cw, w));
+        if (overlapArea <= bestOverlap) continue;
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          try {
             const { ts, elements } = JSON.parse(raw);
-            if (Date.now() - ts < this._cacheTTL) return elements;
-          }
+            if (Date.now() - ts < ttl) {
+              bestElements = elements;
+              bestOverlap = overlapArea;
+            }
+          } catch (_) {}
         }
       }
+      return bestElements;
     } catch (_) {}
     return null;
   }
@@ -1523,6 +1571,8 @@ class MeerkatMapCard extends HTMLElement {
       // The ring stays in 'loading' state while we wait.
       setTimeout(() => {
         if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
+        // Reset in-flight flags so the retry isn't blocked by the previous attempt
+        toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
         this._fetchOverpass(encodedQ, signal).then(finish).catch(() => fail());
       }, 3000);
     });
@@ -1617,6 +1667,9 @@ class MeerkatMapCard extends HTMLElement {
     // Store the bounds this data was fetched for so restore can
     // validate it belongs to the current location before using it
     if (this._lastFetchBounds) this._poiElementsBounds = this._lastFetchBounds;
+    // Keep sessionStorage in sync so navigate-away/reopen restores immediately
+    try { sessionStorage.setItem('mmPOIElements', JSON.stringify(this._poiElements)); } catch (_) {}
+    try { sessionStorage.setItem('mmPOIElementsBounds', JSON.stringify(this._poiElementsBounds)); } catch (_) {}
   }
 
   // ── POI popup ─────────────────────────────────────────────────────
@@ -1879,6 +1932,10 @@ class MeerkatMapCard extends HTMLElement {
     this._poiElements = {};  // clear in-memory cache so stale data cannot be restored
     this._poiElementsBounds = null;
     this._lastFetchBounds = null; // bypass bounds check
+
+    // Also clear the sessionStorage snapshot so a reopen doesn't restore stale data
+    try { sessionStorage.removeItem('mmPOIElements'); } catch (_) {}
+    try { sessionStorage.removeItem('mmPOIElementsBounds'); } catch (_) {}
 
     // Clear localStorage cache for all enabled categories at current bounds
     // so fresh data is fetched rather than served from cache
