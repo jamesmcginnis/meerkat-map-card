@@ -645,6 +645,35 @@ class MeerkatMapCard extends HTMLElement {
           if (f &&
               b.getSouth() >= f.s && b.getNorth() <= f.n &&
               b.getWest()  >= f.w && b.getEast()  <= f.e) return;
+
+          // Skip if every enabled category is already covered by the
+          // in-memory accumulator or a valid localStorage cache entry —
+          // no network request needed even if _lastFetchBounds doesn't cover it.
+          const enabled = MM_POIS.filter(c => this._config[c.key]);
+          if (enabled.length > 0) {
+            const bs = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
+            const allCovered = enabled.every(cat => {
+              // In-memory global accumulator has data for this category
+              if (this._poiAllElements && this._poiAllElements[cat.key] &&
+                  Object.keys(this._poiAllElements[cat.key]).length > 0) return true;
+              // Valid localStorage cache entry (exact or nearby fallback)
+              try {
+                const raw = localStorage.getItem(this._poiCacheKey(cat, bs, bw, bn, be));
+                if (raw) {
+                  const { ts } = JSON.parse(raw);
+                  if (Date.now() - ts < this._cacheTTL) return true;
+                }
+              } catch (_) {}
+              return this._poiCacheFallback(cat, bs, bw, bn, be) !== null;
+            });
+            if (allCovered) {
+              // Data is cached — just re-render layers for the new viewport,
+              // no network activity required.
+              this._loadAllPOIs();
+              return;
+            }
+          }
+
           // Cancel any in-flight requests for the old location
           if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
           this._fetchAbortCtrl = new AbortController();
