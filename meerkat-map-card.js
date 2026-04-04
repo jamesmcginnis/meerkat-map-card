@@ -1341,6 +1341,10 @@ class MeerkatMapCard extends HTMLElement {
     this._fetchAbortCtrl = new AbortController();
     const signal = this._fetchAbortCtrl.signal;
 
+    // Reset the in-flight guard so that flags left over from the aborted
+    // fetch never cause categories to be silently skipped in the new round.
+    this._poiFetching = {};
+
     // Reset ring for this generation
     this._ringGen   = gen;
     this._ringTotal = 0;
@@ -1513,8 +1517,14 @@ class MeerkatMapCard extends HTMLElement {
     };
 
     this._fetchOverpass(encodedQ, signal).then(finish).catch(() => {
-      // Always call fail — ring uses generation so stale calls are ignored
-      fail();
+      if (signal?.aborted) { fail(); return; }
+      // Auto-retry once after 3 seconds — catches Overpass rate limiting
+      // where a second batch fired immediately after the first gets rejected.
+      // The ring stays in 'loading' state while we wait.
+      setTimeout(() => {
+        if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
+        this._fetchOverpass(encodedQ, signal).then(finish).catch(() => fail());
+      }, 3000);
     });
   }
 
@@ -1931,11 +1941,11 @@ class MeerkatMapCard extends HTMLElement {
 
     if (done >= total) {
       clearTimeout(this._ringFadeTimer);
-      const allFailed = this._ringFailed >= total;
+      const anyFailed = (this._ringFailed || 0) > 0;
       this._ringFailed = 0;
       this._ringFadeTimer = setTimeout(() => {
         if (gen === this._ringGen) {
-          this._setRingState(allFailed ? 'error' : 'success');
+          this._setRingState(anyFailed ? 'error' : 'success');
         }
       }, 300);
     }
