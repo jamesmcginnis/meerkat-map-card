@@ -2330,20 +2330,34 @@ class MeerkatMapCardEditor extends HTMLElement {
       const name       = state?.attributes?.friendly_name || entityId;
       const picUrl     = state?.attributes?.entity_picture || '';
       const isSelected = selected.includes(entityId);
+      const selIdx     = selected.indexOf(entityId); // position within selected list
       const zone       = (state?.state || '').toLowerCase();
       const zoneColor  = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : '#AF52DE';
       const avatar     = picUrl
         ? `<img src="${picUrl}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid ${zoneColor};flex-shrink:0;" alt="${name}">`
         : `<div style="width:32px;height:32px;border-radius:50%;background:${zoneColor}22;border:2px solid ${zoneColor};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:${zoneColor};flex-shrink:0;">${(name[0]||'?').toUpperCase()}</div>`;
-      const dragHandle = isSelected
-        ? `<div class="mm-drag-handle" title="Drag to reorder" style="cursor:grab;padding:0 6px 0 2px;color:rgba(128,128,128,0.55);display:flex;align-items:center;flex-shrink:0;touch-action:none;">
-             <svg viewBox="0 0 24 24" width="16" height="16"><path d="M9 20c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" fill="currentColor"/></svg>
-           </div>`
-        : `<div style="width:22px;flex-shrink:0;"></div>`;
+
+      // Up/down reorder buttons — only shown for selected entities, disabled at the edges
+      const canUp   = isSelected && selIdx > 0;
+      const canDown = isSelected && selIdx < selected.length - 1;
+      const btnBase = 'border:none;border-radius:6px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.15s;flex-shrink:0;';
+      const reorderBtns = isSelected ? `
+        <div style="display:flex;flex-direction:column;gap:2px;padding:0 4px 0 2px;flex-shrink:0;">
+          <button data-move-entity="${entityId}" data-move-dir="up"
+            style="${btnBase}background:${canUp ? 'rgba(0,122,255,0.12)' : 'transparent'};color:${canUp ? '#007AFF' : 'rgba(128,128,128,0.25)'};"
+            ${canUp ? '' : 'disabled'} title="Move up">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 14l5-5 5 5z" fill="currentColor"/></svg>
+          </button>
+          <button data-move-entity="${entityId}" data-move-dir="down"
+            style="${btnBase}background:${canDown ? 'rgba(0,122,255,0.12)' : 'transparent'};color:${canDown ? '#007AFF' : 'rgba(128,128,128,0.25)'};"
+            ${canDown ? '' : 'disabled'} title="Move down">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 10l5 5 5-5z" fill="currentColor"/></svg>
+          </button>
+        </div>` : `<div style="width:30px;flex-shrink:0;"></div>`;
 
       return `
-        <div class="toggle-item" draggable="${isSelected}" data-drag-entity="${entityId}" style="${i > 0 ? 'border-top:1px solid rgba(128,128,128,0.1);' : ''}transition:opacity 0.15s,border-top 0.1s;">
-          ${dragHandle}
+        <div class="toggle-item" data-family-row="${entityId}" style="${i > 0 ? 'border-top:1px solid rgba(128,128,128,0.1);' : ''}">
+          ${reorderBtns}
           <div class="toggle-left" style="display:flex;align-items:center;gap:10px;flex:1;">
             ${avatar}
             <div style="flex:1;min-width:0;">
@@ -2358,6 +2372,8 @@ class MeerkatMapCardEditor extends HTMLElement {
         </div>`;
     }).join('') || `<div style="padding:16px;text-align:center;font-size:13px;color:${subCol};">No entities with GPS coordinates found</div>`;
 
+    const searchVal = () => this.shadowRoot.getElementById('mm-family-search')?.value || '';
+
     // Wire up toggles
     listEl.querySelectorAll('input[data-family-entity]').forEach(input => {
       input.onchange = () => {
@@ -2369,129 +2385,26 @@ class MeerkatMapCardEditor extends HTMLElement {
           cur = cur.filter(x => x !== id);
         }
         this._updateConfig('family_members', cur);
-        this._buildFamilyList(this.shadowRoot.getElementById('mm-family-search')?.value || '');
+        this._buildFamilyList(searchVal());
       };
     });
 
-    // ── Shared reorder helper ───────────────────────────────────────
-    const searchVal    = () => this.shadowRoot.getElementById('mm-family-search')?.value || '';
-    const clearHighlights = () => {
-      listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
-        r.style.borderTop = '';
-        r.style.opacity   = '';
-      });
-    };
-    const doReorder = (fromId, toId) => {
-      if (!fromId || !toId || fromId === toId) return;
-      let cur = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
-      const from = cur.indexOf(fromId), to = cur.indexOf(toId);
-      if (from === -1 || to === -1) return;
-      cur.splice(from, 1);
-      cur.splice(to, 0, fromId);
-      this._updateConfig('family_members', cur);
-      this._buildFamilyList(searchVal());
-    };
-
-    // ── Mouse drag (desktop) ────────────────────────────────────────
-    let dragId = null, dragOverId = null;
-
-    listEl.querySelectorAll('[data-drag-entity][draggable="true"]').forEach(row => {
-      row.addEventListener('dragstart', e => {
-        dragId = row.dataset.dragEntity;
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', dragId);
-        setTimeout(() => { row.style.opacity = '0.45'; }, 0);
-      });
-      row.addEventListener('dragend', () => { clearHighlights(); dragId = null; dragOverId = null; });
-    });
-
-    listEl.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      const row = e.target.closest('[data-drag-entity][draggable="true"]');
-      if (!row || row.dataset.dragEntity === dragId || row.dataset.dragEntity === dragOverId) return;
-      dragOverId = row.dataset.dragEntity;
-      listEl.querySelectorAll('[data-drag-entity]').forEach(r => { r.style.borderTop = ''; });
-      row.style.borderTop = '2px solid #007AFF';
-    });
-
-    listEl.addEventListener('dragleave', e => {
-      if (!listEl.contains(e.relatedTarget)) {
-        listEl.querySelectorAll('[data-drag-entity]').forEach(r => { r.style.borderTop = ''; });
-        dragOverId = null;
-      }
-    });
-
-    listEl.addEventListener('drop', e => {
-      e.preventDefault();
-      const targetRow = e.target.closest('[data-drag-entity][draggable="true"]');
-      clearHighlights();
-      doReorder(dragId, targetRow?.dataset.dragEntity);
-    });
-
-    // ── Touch drag (iOS / mobile) ───────────────────────────────────
-    // HTML5 drag-and-drop is not supported on iOS Safari, so we implement
-    // reordering with touch events attached to each drag handle.
-    let tId = null, tOverId = null, tClone = null;
-    let tStartY = 0, tCloneTop = 0, tActive = false;
-
-    listEl.querySelectorAll('.mm-drag-handle').forEach(handle => {
-      const row = handle.closest('[data-drag-entity]');
-      if (!row || row.getAttribute('draggable') !== 'true') return;
-
-      handle.addEventListener('touchstart', e => {
-        tId     = row.dataset.dragEntity;
-        tStartY = e.touches[0].clientY;
-        tActive = false;
-        tOverId = null;
-      }, { passive: true });
-
-      handle.addEventListener('touchmove', e => {
-        if (!tId) return;
-        const dy     = e.touches[0].clientY - tStartY;
-        const touchY = e.touches[0].clientY;
-
-        // Activate drag once the finger moves more than 5px vertically
-        if (!tActive && Math.abs(dy) > 5) {
-          tActive = true;
-          const rect = row.getBoundingClientRect();
-          tCloneTop  = rect.top;
-          tClone     = row.cloneNode(true);
-          Object.assign(tClone.style, {
-            position: 'fixed', left: rect.left + 'px', top: rect.top + 'px',
-            width: rect.width + 'px', zIndex: '9999', opacity: '0.88',
-            pointerEvents: 'none', borderRadius: '10px',
-            background: 'rgba(0,122,255,0.09)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.3)', transition: 'none',
-          });
-          // Append to shadow root so shadow CSS (toggle-track etc.) applies
-          this.shadowRoot.appendChild(tClone);
-          row.style.opacity = '0.4';
+    // Wire up up/down reorder buttons
+    listEl.querySelectorAll('button[data-move-entity]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.preventDefault();
+        const id  = btn.dataset.moveEntity;
+        const dir = btn.dataset.moveDir;
+        let cur   = Array.isArray(this._config.family_members) ? [...this._config.family_members] : [];
+        const idx = cur.indexOf(id);
+        if (idx === -1) return;
+        if (dir === 'up' && idx > 0) {
+          [cur[idx - 1], cur[idx]] = [cur[idx], cur[idx - 1]];
+        } else if (dir === 'down' && idx < cur.length - 1) {
+          [cur[idx], cur[idx + 1]] = [cur[idx + 1], cur[idx]];
         }
-
-        if (!tActive) return;
-        e.preventDefault(); // block list scroll while dragging
-
-        if (tClone) tClone.style.top = (tCloneTop + dy) + 'px';
-
-        // Highlight whichever row the finger is currently over
-        listEl.querySelectorAll('[data-drag-entity]').forEach(r => { r.style.borderTop = ''; });
-        tOverId = null;
-        listEl.querySelectorAll('[data-drag-entity]').forEach(r => {
-          if (r.dataset.dragEntity === tId) return;
-          const rect = r.getBoundingClientRect();
-          if (touchY >= rect.top && touchY < rect.bottom) {
-            r.style.borderTop = '2px solid #007AFF';
-            tOverId = r.dataset.dragEntity;
-          }
-        });
-      }, { passive: false });
-
-      handle.addEventListener('touchend', () => {
-        if (tClone) { tClone.remove(); tClone = null; }
-        clearHighlights();
-        if (tActive && tOverId) doReorder(tId, tOverId);
-        tId = null; tOverId = null; tActive = false;
+        this._updateConfig('family_members', cur);
+        this._buildFamilyList(searchVal());
       });
     });
   }
