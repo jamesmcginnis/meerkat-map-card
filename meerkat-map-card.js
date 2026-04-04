@@ -1712,8 +1712,9 @@ class MeerkatMapCard extends HTMLElement {
       return await Promise.any(proxyUrls.map(tryFetch));
     } catch (e) {
       if (signal && signal.aborted) throw new DOMException('', 'AbortError');
-      // Propagate typed aggregate error so callers can inspect error codes
-      throw e;
+      // Proxy not installed or all proxy attempts failed — fall back to direct.
+      // Typed errors (rate_limit/busy/timeout) will propagate from the direct
+      // fetch below if all mirrors fail there too.
     }
 
     // Fallback: race mirrors directly (works on desktop, blocked on iOS without proxy)
@@ -2100,12 +2101,6 @@ class MeerkatMapCard extends HTMLElement {
         body: 'The OpenStreetMap servers are currently under heavy load and could not be reached. Cached data is shown where available. Please try again in a moment.',
         btnLabel: 'Got it',
       },
-      cooldown: {
-        icon: '⏳',
-        title: 'Too soon to refresh',
-        body: `Please wait ${value} more second${value !== 1 ? 's' : ''} before refreshing again. This helps keep the OpenStreetMap servers happy.`,
-        btnLabel: 'Got it',
-      },
     };
 
     const { icon, title, body, btnLabel } = configs[type] || configs.busy;
@@ -2159,18 +2154,6 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   _confirmRefreshPOIs() {
-    // Enforce a 60-second cooldown between manual refreshes to avoid hammering
-    // the Overpass API. Show a friendly info sheet if the user taps too soon.
-    const COOLDOWN_MS = 60000;
-    try {
-      const lastRefresh = parseInt(localStorage.getItem('mmLastRefresh') || '0');
-      const elapsed = Date.now() - lastRefresh;
-      if (elapsed < COOLDOWN_MS) {
-        this._showAPIInfoSheet('cooldown', Math.ceil((COOLDOWN_MS - elapsed) / 1000));
-        return;
-      }
-    } catch (_) {}
-
     const isDark   = this._isDark();
     const bg       = isDark ? 'rgba(28,28,30,0.96)' : 'rgba(252,252,254,0.98)';
     const tx       = isDark ? '#fff' : '#000';
@@ -2211,9 +2194,6 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   _forceRefreshPOIs() {
-    // Record the time of this refresh for the cooldown guard
-    try { localStorage.setItem('mmLastRefresh', String(Date.now())); } catch (_) {}
-
     // Abort any in-flight requests
     if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
     this._poiFetching = {};
