@@ -642,23 +642,42 @@ class MeerkatMapCard extends HTMLElement {
         // 2500ms debounce: generous pause so the user can keep scrolling
         // without triggering a fetch on every momentary stop
         this._poiDebounce = setTimeout(() => {
-          const b  = this._map.getBounds();
-          const bs = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
-          const f  = this._lastFetchBounds;
+          const b = this._map.getBounds();
+          const f = this._lastFetchBounds;
+          // Skip if new view fits inside the last fetched area
+          if (f &&
+              b.getSouth() >= f.s && b.getNorth() <= f.n &&
+              b.getWest()  >= f.w && b.getEast()  <= f.e) return;
 
-          // Fast path 1: entire new view is inside the last fetched bounding box
-          if (f && bs >= f.s && bn <= f.n && bw >= f.w && be <= f.e) return;
-
-          // Fast path 2: every enabled category is already covered for this centre —
-          // just re-render from the accumulator, no network activity needed.
+          // Skip if every enabled category is already covered by the
+          // in-memory accumulator or a valid localStorage cache entry —
+          // no network request needed even if _lastFetchBounds doesn't cover it.
           const enabled = MM_POIS.filter(c => this._config[c.key]);
-          if (enabled.length > 0 &&
-              enabled.every(cat => this._isAreaFetched(cat, bs, bw, bn, be))) {
-            this._loadAllPOIs();
-            return;
+          if (enabled.length > 0) {
+            const bs = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
+            const allCovered = enabled.every(cat => {
+              // In-memory global accumulator has data for this category
+              if (this._poiAllElements && this._poiAllElements[cat.key] &&
+                  Object.keys(this._poiAllElements[cat.key]).length > 0) return true;
+              // Valid localStorage cache entry (exact or nearby fallback)
+              try {
+                const raw = localStorage.getItem(this._poiCacheKey(cat, bs, bw, bn, be));
+                if (raw) {
+                  const { ts } = JSON.parse(raw);
+                  if (Date.now() - ts < this._cacheTTL) return true;
+                }
+              } catch (_) {}
+              return this._poiCacheFallback(cat, bs, bw, bn, be) !== null;
+            });
+            if (allCovered) {
+              // Data is cached — just re-render layers for the new viewport,
+              // no network activity required.
+              this._loadAllPOIs();
+              return;
+            }
           }
 
-          // At least one category needs a fresh fetch for this area.
+          // Cancel any in-flight requests for the old location
           if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
           this._fetchAbortCtrl = new AbortController();
           this._poiFetching = {};
@@ -1442,21 +1461,10 @@ class MeerkatMapCard extends HTMLElement {
     this._ringTotal = 0;
     this._ringDone  = 0;
 
-    // Batch into groups of 8 — one Overpass request per batch.
-    // Batches are staggered by 1.2 s so they don't all hit the same mirror
-    // simultaneously, which is the primary cause of "Servers are busy" errors.
-    const BATCH = 8;
-    const STAGGER_MS = 1200;
+    // Batch into groups of 5 — one Overpass request per batch.
+    const BATCH = 5;
     for (let i = 0; i < needsFetch.length; i += BATCH) {
-      const delay = Math.floor(i / BATCH) * STAGGER_MS;
-      if (delay > 0) {
-        setTimeout(() => {
-          if (signal.aborted || gen !== this._loadGen) return;
-          this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e, signal, gen);
-        }, delay);
-      } else {
-        this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e, signal, gen);
-      }
+      this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e, signal, gen);
     }
   }
 
@@ -1542,35 +1550,35 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._poiAllElements?.[cat.key] ||
         Object.keys(this._poiAllElements[cat.key]).length === 0) return false;
 
-    const ttl    = this._cacheTTL;
-    const nowMs  = Date.now();
-    // Centre of the requested viewport — the anchor for the coverage check.
-    // Every fetch adds 25% padding around the visible area, so the stored
-    // region is always larger than the viewport. As long as the new centre
-    // falls inside a stored region the data is guaranteed to cover what the
-    // user can see — no re-fetch is needed.
-    const midLat = (s + n) / 2;
-    const midLng = (w + e) / 2;
+    const ttl      = this._cacheTTL;
+    const nowMs    = Date.now();
+    const viewArea = (n - s) * (e - w);
 
-    const coversMid = (regions) => {
+    // Returns true if a single stored region covers ≥50% of the requested viewport.
+    // This is far more robust than midpoint containment — the user can pan up to
+    // half a viewport distance in any direction without triggering a redundant fetch.
+    const coversView = (regions) => {
       if (!regions) return false;
       for (const r of regions) {
         if (nowMs - r.ts >= ttl) continue;
-        if (midLat >= r.s && midLat <= r.n && midLng >= r.w && midLng <= r.e) return true;
+        const oS = Math.max(r.s, s), oN = Math.min(r.n, n);
+        const oW = Math.max(r.w, w), oE = Math.min(r.e, e);
+        if (oN <= oS || oE <= oW) continue; // no overlap
+        if (viewArea <= 0) return true;
+        if (((oN - oS) * (oE - oW)) / viewArea >= 0.5) return true;
       }
       return false;
     };
 
-    // Fast path: in-memory region index
-    if (coversMid(this._fetchedRegions?.[cat.key])) return true;
+    // Fast path: check in-memory regions first
+    if (coversView(this._fetchedRegions?.[cat.key])) return true;
 
-    // Fallback: localStorage — warm the in-memory index on hit so subsequent
-    // checks for the same category don't need another localStorage read.
+    // Fallback: check localStorage and warm the in-memory cache on hit
     try {
       const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
       if (!raw) return false;
       const stored = JSON.parse(raw);
-      if (coversMid(stored)) {
+      if (coversView(stored)) {
         if (!this._fetchedRegions) this._fetchedRegions = {};
         this._fetchedRegions[cat.key] = stored;
         return true;
@@ -1640,59 +1648,41 @@ class MeerkatMapCard extends HTMLElement {
       this._poiRingEnd(gen, true); // failed
     };
 
-    // _attemptFetch: try the Overpass fetch, retrying on busy with
-    // exponential backoff + jitter (5 s → 20 s → 60 s). Rate-limit and
-    // unknown errors are handled without retry to avoid hammering servers.
-    const MAX_ATTEMPTS = 3;
-    const BASE_DELAY_MS = 5000;
+    this._fetchOverpass(encodedQ, signal).then(finish).catch(err => {
+      if (signal?.aborted) { fail(); return; }
 
-    const _attemptFetch = (attempt) => {
-      this._fetchOverpass(encodedQ, signal).then(finish).catch(err => {
-        if (signal?.aborted) { fail(); return; }
+      // Inspect all individual errors from AggregateError (Promise.any rejection)
+      // or the single error from a direct throw.
+      const errs = err?.errors || [err];
+      const codes = errs.map(e => e?.code).filter(Boolean);
 
-        const errs  = err?.errors || [err];
-        const codes = errs.map(e => e?.code).filter(Boolean);
+      if (codes.includes('rate_limit')) {
+        const retryAfter = errs.find(e => e?.retryAfter)?.retryAfter || 60;
+        this._showAPIInfoSheet('rate_limit', retryAfter);
+        fail(); return;
+      }
+      if (codes.includes('busy') || codes.every(c => c === 'timeout')) {
+        this._showAPIInfoSheet('busy');
+        fail(); return;
+      }
 
-        // Rate limit — surface immediately, no retry
-        if (codes.includes('rate_limit')) {
-          const retryAfter = errs.find(e => e?.retryAfter)?.retryAfter || 60;
-          this._showAPIInfoSheet('rate_limit', retryAfter);
-          fail(); return;
-        }
-
-        // Busy / all timed out — retry with exponential backoff + jitter
-        if (codes.includes('busy') || codes.every(c => c === 'timeout')) {
-          if (attempt < MAX_ATTEMPTS) {
-            // jitter: ±20% of the base delay so retries from multiple batches
-            // don't all fire at exactly the same moment
-            const jitter   = (Math.random() * 0.4 - 0.2);
-            const delayMs  = Math.round(BASE_DELAY_MS * Math.pow(4, attempt - 1) * (1 + jitter));
-            setTimeout(() => {
-              if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
-              toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
-              _attemptFetch(attempt + 1);
-            }, delayMs);
-          } else {
+      // Unknown error — auto-retry once after 3 seconds (catches transient failures)
+      setTimeout(() => {
+        if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
+        toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
+        this._fetchOverpass(encodedQ, signal).then(finish).catch(retryErr => {
+          if (signal?.aborted) { fail(); return; }
+          const retryCodes = (retryErr?.errors || [retryErr]).map(e => e?.code).filter(Boolean);
+          if (retryCodes.includes('rate_limit')) {
+            const retryAfter = (retryErr?.errors || [retryErr]).find(e => e?.retryAfter)?.retryAfter || 60;
+            this._showAPIInfoSheet('rate_limit', retryAfter);
+          } else if (retryCodes.includes('busy') || retryCodes.every(c => c === 'timeout')) {
             this._showAPIInfoSheet('busy');
-            fail();
           }
-          return;
-        }
-
-        // Unknown / transient — single auto-retry after 3 s
-        if (attempt < 2) {
-          setTimeout(() => {
-            if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
-            toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
-            _attemptFetch(attempt + 1);
-          }, 3000);
-        } else {
           fail();
-        }
-      });
-    };
-
-    _attemptFetch(1);
+        });
+      }, 3000);
+    });
   }
 
   // ── Multi-strategy Overpass fetcher ───────────────────────────────
@@ -1713,7 +1703,7 @@ class MeerkatMapCard extends HTMLElement {
       });
       return Promise.race([
         fetch(url, opts)
-          .then(async r => {
+          .then(r => {
             if (r.status === 429) {
               const e = new Error('rate_limit'); e.code = 'rate_limit';
               e.retryAfter = parseInt(r.headers.get('Retry-After') || '60');
@@ -1723,16 +1713,7 @@ class MeerkatMapCard extends HTMLElement {
               const e = new Error('busy'); e.code = 'busy'; throw e;
             }
             if (!r.ok) { const e = new Error(String(r.status)); e.code = 'http_error'; throw e; }
-            // Overpass sometimes returns 200 OK but with a plain-text error body
-            // (e.g. "Server busy" or "rate_limited") — detect and rethrow these.
-            const text = await r.text();
-            if (/server\s+busy|rate.?limit|too\s+many\s+request/i.test(text)) {
-              const isBusy = /server\s+busy/i.test(text);
-              const code = isBusy ? 'busy' : 'rate_limit';
-              const e = new Error(code); e.code = code; throw e;
-            }
-            try { return JSON.parse(text).elements || []; }
-            catch (_) { const e = new Error('parse_error'); e.code = 'http_error'; throw e; }
+            return r.json().then(d => d.elements || []);
           }),
         timeout
       ]);
@@ -2549,23 +2530,23 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
-        <!-- Overpass Mirrors -->
+        <!-- Overpass API Mirrors -->
         <div>
           <div class="section-title">Overpass API Mirrors</div>
-          <div class="hint" style="margin-bottom:6px;">POI data is fetched from OpenStreetMap via Overpass API. The card races all five mirrors simultaneously and uses whichever responds first. On iOS or if you see fetch errors, install the <a href="https://github.com/doudz/homeassistant-addons" target="_blank" rel="noopener" style="color:#007AFF;text-decoration:none;font-weight:600;">HA Web Proxy</a> add-on and add each mirror URL below — this routes requests through your Home Assistant server, bypassing browser restrictions.</div>
+          <div class="hint" style="margin-bottom:6px;">POI data is fetched from OpenStreetMap via Overpass API. The card races all five mirrors simultaneously and uses whichever responds first. On iOS or if you see fetch errors, install the <a href="https://github.com/dermotduffy/hass-web-proxy-integration" target="_blank" rel="noopener" style="color:#007AFF;text-decoration:none;font-weight:600;">HA Web Proxy</a> integration and add each URL pattern below — this routes requests through your Home Assistant server, bypassing browser restrictions.</div>
           <div class="card-block">
             <div style="padding:14px 16px 6px;">
               <div style="font-size:12px;font-weight:600;color:var(--secondary-text-color);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em;">How to add a mirror</div>
               <div style="font-size:13px;color:var(--primary-text-color);line-height:1.6;margin-bottom:12px;">
-                In <strong>Settings → Add-ons</strong>, install <em>HA Web Proxy</em>. Then open its configuration and paste each URL into the <code style="font-size:12px;background:rgba(128,128,128,0.15);border-radius:4px;padding:1px 5px;">allowed_domains</code> list.
+                In <strong>Settings → Integrations</strong>, install <em>HA Web Proxy</em>. Open its options and click <strong>+ ADD</strong> for each URL pattern below.
               </div>
-              <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:4px;">
+              <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
                 ${[
-                  { label: 'Official',      flag: '🇩🇪', url: 'https://overpass-api.de/api/interpreter*',                        note: 'Primary — Germany' },
-                  { label: 'Kumi Systems',  flag: '🇪🇺', url: 'https://overpass.kumi.systems/api/interpreter*',                  note: 'Europe' },
-                  { label: 'Mail.ru',       flag: '🇷🇺', url: 'https://maps.mail.ru/osm/tools/overpass/api/interpreter*',        note: 'Russia' },
-                  { label: 'OSM Russia',    flag: '🇷🇺', url: 'https://overpass.openstreetmap.ru/api/interpreter*',              note: 'Russia' },
-                  { label: 'OSM Switzerland', flag: '🇨🇭', url: 'https://overpass.osm.ch/api/interpreter*',                    note: 'Switzerland' },
+                  { label: 'Official',          flag: '🇩🇪', url: 'https://overpass-api.de/api/interpreter*',                  note: 'Primary — Germany' },
+                  { label: 'Kumi Systems',       flag: '🇪🇺', url: 'https://overpass.kumi.systems/api/interpreter*',            note: 'Europe' },
+                  { label: 'Mail.ru',            flag: '🇷🇺', url: 'https://maps.mail.ru/osm/tools/overpass/api/interpreter*',  note: 'Russia' },
+                  { label: 'OSM Russia',         flag: '🇷🇺', url: 'https://overpass.openstreetmap.ru/api/interpreter*',        note: 'Russia' },
+                  { label: 'OSM Switzerland',    flag: '🇨🇭', url: 'https://overpass.osm.ch/api/interpreter*',                  note: 'Switzerland' },
                 ].map(m => `
                   <div style="background:rgba(128,128,128,0.08);border-radius:10px;padding:10px 12px;">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
@@ -2574,7 +2555,7 @@ class MeerkatMapCardEditor extends HTMLElement {
                       <span style="font-size:11px;color:var(--secondary-text-color);margin-left:auto;">${m.note}</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;">
-                      <code id="mm-mirror-${m.label.replace(/\s/g,'')}" style="flex:1;font-size:11px;word-break:break-all;background:rgba(128,128,128,0.13);border-radius:6px;padding:5px 8px;color:var(--primary-text-color);font-family:ui-monospace,monospace;">${m.url}</code>
+                      <code style="flex:1;font-size:11px;word-break:break-all;background:rgba(128,128,128,0.13);border-radius:6px;padding:5px 8px;color:var(--primary-text-color);font-family:ui-monospace,monospace;">${m.url}</code>
                       <button data-copy="${m.url}" style="flex-shrink:0;padding:5px 10px;border:none;border-radius:6px;background:#007AFF;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">Copy</button>
                     </div>
                   </div>`).join('')}
@@ -2773,14 +2754,11 @@ class MeerkatMapCardEditor extends HTMLElement {
           btn.textContent = '✓';
           setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
         }).catch(() => {
-          // Fallback for browsers without clipboard API
           btn.textContent = '✓';
           setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
         });
       });
     });
-
-    root.getElementById('person_entity').onchange  = e => this._updateConfig('person_entity',  e.target.value);
     if (root.getElementById('geocoded_entity')) root.getElementById('geocoded_entity').onchange = e => this._updateConfig('geocoded_entity', e.target.value);
     root.querySelectorAll('input[name="dist"]').forEach(r => r.onchange = () => this._updateConfig('distance_unit', r.value));
     root.getElementById('map_height').oninput     = e => this._updateConfig('map_height', parseInt(e.target.value) || 420);
