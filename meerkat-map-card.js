@@ -2810,27 +2810,44 @@ class MeerkatMapCardEditor extends HTMLElement {
     const ttlSel = root.getElementById('cache_ttl_hours');
     if (ttlSel) ttlSel.onchange = e => this._updateConfig('cache_ttl_hours', parseInt(e.target.value));
 
-    // Copy-to-clipboard buttons for proxy mirror URLs
+    // ── Copy-to-clipboard for proxy mirror URLs ──────────────────────
+    // Robust helper: works in HA's shadow DOM / iframe context.
+    // Always appends the textarea to document.body (light DOM) so
+    // .focus() / .select() / execCommand all work reliably.
+    const _mmDoCopy = text => {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).catch(() => _mmExecCopy(text));
+      } else {
+        _mmExecCopy(text);
+      }
+    };
+    const _mmExecCopy = text => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:50%;width:1px;height:1px;opacity:0;pointer-events:none;';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      document.body.removeChild(ta);
+    };
     root.querySelectorAll('.mm-copy-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
         const url = btn.dataset.copy || '';
-        navigator.clipboard.writeText(url).then(() => {
-          const orig = btn.textContent;
-          btn.textContent = '✓ Copied!';
-          btn.style.background = '#34C759';
-          setTimeout(() => { btn.textContent = orig; btn.style.background = '#007AFF'; }, 2000);
-        }).catch(() => {
-          // Fallback for older browsers / non-secure contexts
-          const ta = document.createElement('textarea');
-          ta.value = url; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
-          document.body.appendChild(ta); ta.focus(); ta.select();
-          try { document.execCommand('copy'); } catch (_) {}
-          document.body.removeChild(ta);
-          const orig = btn.textContent;
-          btn.textContent = '✓ Copied!';
-          btn.style.background = '#34C759';
-          setTimeout(() => { btn.textContent = orig; btn.style.background = '#007AFF'; }, 2000);
-        });
+        const orig = btn.innerHTML;
+        btn.innerHTML = '&#10003;&nbsp;Copied!';
+        btn.style.background = '#34C759';
+        btn.style.transform = 'scale(0.94)';
+        btn.style.transition = 'background 0.15s, transform 0.15s';
+        btn.disabled = true;
+        setTimeout(() => {
+          btn.innerHTML = orig;
+          btn.style.background = '#007AFF';
+          btn.style.transform = '';
+          btn.disabled = false;
+        }, 2200);
+        _mmDoCopy(url);
       });
     });
 
