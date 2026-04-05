@@ -1656,12 +1656,29 @@ class MeerkatMapCard extends HTMLElement {
       const errs = err?.errors || [err];
       const codes = errs.map(e => e?.code).filter(Boolean);
 
+      // If every category already has data in the accumulator, render from
+      // cache and clear the in-flight flags silently — no need to surface any
+      // error or retry the network at all.
+      const _allCached = () => toFetch.every(cat =>
+        this._poiAllElements?.[cat.key] &&
+        Object.keys(this._poiAllElements[cat.key]).length > 0
+      );
+      const _renderFromCache = () => {
+        toFetch.forEach(cat => {
+          this._renderPOILayer(cat, []);
+          if (this._poiFetching) this._poiFetching[cat.key] = false;
+        });
+        this._poiRingEnd(gen);
+      };
+
       if (codes.includes('rate_limit')) {
+        if (_allCached()) { _renderFromCache(); return; }
         const retryAfter = errs.find(e => e?.retryAfter)?.retryAfter || 60;
         this._showAPIInfoSheet('rate_limit', retryAfter);
         fail(); return;
       }
       if (codes.includes('busy') || codes.every(c => c === 'timeout')) {
+        if (_allCached()) { _renderFromCache(); return; }
         this._showAPIInfoSheet('busy');
         fail(); return;
       }
@@ -1669,9 +1686,11 @@ class MeerkatMapCard extends HTMLElement {
       // Unknown error — auto-retry once after 3 seconds (catches transient failures)
       setTimeout(() => {
         if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
+        if (_allCached()) { _renderFromCache(); return; }
         toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
         this._fetchOverpass(encodedQ, signal).then(finish).catch(retryErr => {
           if (signal?.aborted) { fail(); return; }
+          if (_allCached()) { _renderFromCache(); return; }
           const retryCodes = (retryErr?.errors || [retryErr]).map(e => e?.code).filter(Boolean);
           if (retryCodes.includes('rate_limit')) {
             const retryAfter = (retryErr?.errors || [retryErr]).find(e => e?.retryAfter)?.retryAfter || 60;
@@ -1692,8 +1711,6 @@ class MeerkatMapCard extends HTMLElement {
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
-      `https://overpass.openstreetmap.ru/api/interpreter?data=${encodedQ}`,
-      `https://overpass.osm.ch/api/interpreter?data=${encodedQ}`,
     ];
     const tryFetch = url => {
       const timeout = new Promise((_, reject) => {
@@ -2577,8 +2594,6 @@ class MeerkatMapCardEditor extends HTMLElement {
                     { label: 'Main (Germany)',     url: 'https://overpass-api.de/*' },
                     { label: 'Kumi Systems',       url: 'https://overpass.kumi.systems/*' },
                     { label: 'Mail.ru (Russia)',   url: 'https://maps.mail.ru/*' },
-                    { label: 'OpenStreetMap (RU)', url: 'https://overpass.openstreetmap.ru/*' },
-                    { label: 'OSM Switzerland',    url: 'https://overpass.osm.ch/*' },
                   ].map((m, i) => `
                     <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(0,0,0,0.04);border-radius:9px;margin-bottom:6px;${i===0?'border:1px solid rgba(52,199,89,0.35);':'border:1px solid rgba(128,128,128,0.1);'}">
                       <div style="flex:1;min-width:0;">
