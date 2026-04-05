@@ -2535,50 +2535,50 @@ class MeerkatMapCardEditor extends HTMLElement {
           <div class="section-title">🔌 Web Proxy Setup</div>
           <div class="hint" style="margin-bottom:6px;">Required on iOS & tablets — routes map data through your Home Assistant server so it's never blocked.</div>
           <div class="card-block">
-            <div style="padding:14px 16px 6px;">
+            <div style="padding:14px 16px 10px;">
               <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:8px;">What is this and why do I need it?</div>
-              <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.6;margin-bottom:12px;">
-                When you open this card on an iPhone or iPad, the browser blocks connections to external map servers for security reasons. The <strong>Home Assistant Web Proxy</strong> integration solves this — it acts as a relay, fetching map data through your Home Assistant server instead.
+              <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.6;margin-bottom:14px;">
+                When you open this card on an iPhone or iPad, the browser blocks direct connections to external map servers. The <strong>HA Web Proxy</strong> integration solves this — it relays requests through your Home Assistant server so the map loads everywhere.
                 <br><br>
                 ✅ &nbsp;Works on iOS, Android &amp; desktop<br>
                 ✅ &nbsp;Takes about 2 minutes to set up<br>
-                ✅ &nbsp;Free, open-source, no account needed
+                ✅ &nbsp;Free &amp; open-source
               </div>
 
               <!-- Step 1 -->
-              <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start;">
+              <div style="display:flex;gap:10px;margin-bottom:14px;align-items:flex-start;">
                 <div style="min-width:24px;height:24px;border-radius:50%;background:#007AFF;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">1</div>
                 <div>
-                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Install the integration</div>
-                  <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;margin-bottom:6px;">Add it via HACS or manually from the GitHub repo. Restart Home Assistant once installed.</div>
-                  <a href="https://github.com/dend/hass-web-proxy-integration" target="_blank" rel="noopener"
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Install the integration via HACS</div>
+                  <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;margin-bottom:8px;">Search for <strong>HA Web Proxy</strong> in HACS and install it, then restart Home Assistant. You can also install it manually — full instructions are on GitHub.</div>
+                  <a href="https://github.com/dermotduffy/hass-web-proxy-integration" target="_blank" rel="noopener"
                     style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(0,122,255,0.12);color:#007AFF;border:1px solid rgba(0,122,255,0.25);border-radius:10px;font-size:12px;font-weight:600;text-decoration:none;">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>
-                    View on GitHub → hass-web-proxy-integration
+                    GitHub → hass-web-proxy-integration
                   </a>
                 </div>
               </div>
 
               <!-- Step 2 -->
-              <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start;">
+              <div style="display:flex;gap:10px;margin-bottom:14px;align-items:flex-start;">
                 <div style="min-width:24px;height:24px;border-radius:50%;background:#007AFF;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">2</div>
                 <div style="flex:1;min-width:0;">
-                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Allow the Overpass servers in your config</div>
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Add the Overpass mirrors to the proxy</div>
                   <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;margin-bottom:8px;">
-                    Open your <code style="background:rgba(0,0,0,0.1);padding:1px 5px;border-radius:4px;font-size:11px;">configuration.yaml</code> and add each server URL below to the proxy's <code style="background:rgba(0,0,0,0.1);padding:1px 5px;border-radius:4px;font-size:11px;">allowed_domains</code> list. Copy each one using the button next to it.
+                    Go to <strong>Settings → Devices &amp; Services → HA Web Proxy</strong> and add each URL below as an allowed endpoint. Copy each one with the button — they must end in <code style="background:rgba(0,0,0,0.1);padding:1px 5px;border-radius:4px;font-size:11px;">/*</code> to allow all paths on that server.
                   </div>
 
                   <!-- Mirror list with copy buttons -->
                   ${[
-                    { label: 'Main (Germany)',     url: 'https://overpass-api.de' },
-                    { label: 'Kumi Systems',       url: 'https://overpass.kumi.systems' },
-                    { label: 'Mail.ru (Russia)',   url: 'https://maps.mail.ru' },
-                    { label: 'OpenStreetMap (RU)', url: 'https://overpass.openstreetmap.ru' },
-                    { label: 'OSM Switzerland',    url: 'https://overpass.osm.ch' },
+                    { label: 'Main (Germany)',     url: 'https://overpass-api.de/*' },
+                    { label: 'Kumi Systems',       url: 'https://overpass.kumi.systems/*' },
+                    { label: 'Mail.ru (Russia)',   url: 'https://maps.mail.ru/*' },
+                    { label: 'OpenStreetMap (RU)', url: 'https://overpass.openstreetmap.ru/*' },
+                    { label: 'OSM Switzerland',    url: 'https://overpass.osm.ch/*' },
                   ].map((m, i) => `
                     <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(0,0,0,0.04);border-radius:9px;margin-bottom:6px;${i===0?'border:1px solid rgba(52,199,89,0.35);':'border:1px solid rgba(128,128,128,0.1);'}">
                       <div style="flex:1;min-width:0;">
-                        <div style="font-size:11px;font-weight:600;color:var(--secondary-text-color);margin-bottom:1px;">${i===0?'⭐ ':''} ${m.label}</div>
+                        <div style="font-size:11px;font-weight:600;color:var(--secondary-text-color);margin-bottom:1px;">${i===0?'⭐ ':''}${m.label}</div>
                         <div style="font-size:11px;font-family:monospace;color:var(--primary-text-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.url}</div>
                       </div>
                       <button class="mm-copy-btn" data-copy="${m.url}" style="flex-shrink:0;padding:6px 10px;border:none;border-radius:8px;background:#007AFF;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;">Copy</button>
@@ -2588,21 +2588,21 @@ class MeerkatMapCardEditor extends HTMLElement {
               </div>
 
               <!-- Step 3 -->
-              <div style="display:flex;gap:10px;margin-bottom:8px;align-items:flex-start;">
-                <div style="min-width:24px;height:24px;border-radius:50%;background:#007AFF;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">3</div>
+              <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start;">
+                <div style="min-width:24px;height:24px;border-radius:50%;background:#34C759;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">✓</div>
                 <div>
-                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Restart Home Assistant</div>
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">That's it!</div>
                   <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;">
-                    After saving your <code style="background:rgba(0,0,0,0.1);padding:1px 5px;border-radius:4px;font-size:11px;">configuration.yaml</code>, do a full restart of Home Assistant. The map will then route all requests through your HA server automatically — no further config needed!
+                    No restart needed. The card will automatically route all Overpass requests through your HA server from now on.
                   </div>
                 </div>
               </div>
 
               <!-- Info tip -->
-              <div style="display:flex;gap:8px;padding:10px 12px;background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.25);border-radius:10px;margin-top:8px;margin-bottom:4px;">
+              <div style="display:flex;gap:8px;padding:10px 12px;background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.25);border-radius:10px;margin-top:4px;margin-bottom:4px;">
                 <span style="font-size:16px;flex-shrink:0;">💡</span>
                 <div style="font-size:11px;color:var(--secondary-text-color);line-height:1.55;">
-                  <strong style="color:var(--primary-text-color);">Don't have HACS?</strong> No problem — you can install the integration manually by copying the <code style="background:rgba(0,0,0,0.12);padding:1px 4px;border-radius:3px;">hass_web_proxy</code> folder from the GitHub repo into your <code style="background:rgba(0,0,0,0.12);padding:1px 4px;border-radius:3px;">custom_components</code> directory.
+                  <strong style="color:var(--primary-text-color);">Don't have HACS?</strong> You can install the integration manually — copy the <code style="background:rgba(0,0,0,0.12);padding:1px 4px;border-radius:3px;">hass_web_proxy</code> folder from the GitHub repo into your <code style="background:rgba(0,0,0,0.12);padding:1px 4px;border-radius:3px;">custom_components</code> directory and restart Home Assistant.
                 </div>
               </div>
 
