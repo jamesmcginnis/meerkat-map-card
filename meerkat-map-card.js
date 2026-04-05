@@ -2578,10 +2578,13 @@ class MeerkatMapCardEditor extends HTMLElement {
                   ].map((m, i) => `
                     <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(0,0,0,0.04);border-radius:9px;margin-bottom:6px;${i===0?'border:1px solid rgba(52,199,89,0.35);':'border:1px solid rgba(128,128,128,0.1);'}">
                       <div style="flex:1;min-width:0;">
-                        <div style="font-size:11px;font-weight:600;color:var(--secondary-text-color);margin-bottom:1px;">${i===0?'⭐ ':''}${m.label}</div>
-                        <div style="font-size:11px;font-family:monospace;color:var(--primary-text-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.url}</div>
+                        <div style="font-size:11px;font-weight:600;color:var(--secondary-text-color);margin-bottom:3px;">${i===0?'⭐ ':''}${m.label}</div>
+                        <input id="mm-mirror-url-${i}" type="text" readonly value="${m.url}"
+                          style="width:100%;background:transparent;border:none;outline:none;padding:0;font-size:11px;font-family:monospace;color:var(--primary-text-color);cursor:text;caret-color:transparent;"
+                          onclick="this.select()">
                       </div>
-                      <button class="mm-copy-btn" data-copy="${m.url}" style="flex-shrink:0;padding:6px 10px;border:none;border-radius:8px;background:#007AFF;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;">Copy</button>
+                      <button class="mm-copy-btn" data-copy="${m.url}" data-input-id="mm-mirror-url-${i}"
+                        style="flex-shrink:0;padding:6px 10px;border:none;border-radius:8px;background:#007AFF;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;">Copy</button>
                     </div>
                   `).join('')}
                 </div>
@@ -2811,43 +2814,46 @@ class MeerkatMapCardEditor extends HTMLElement {
     if (ttlSel) ttlSel.onchange = e => this._updateConfig('cache_ttl_hours', parseInt(e.target.value));
 
     // ── Copy-to-clipboard for proxy mirror URLs ──────────────────────
-    // Robust helper: works in HA's shadow DOM / iframe context.
-    // Always appends the textarea to document.body (light DOM) so
-    // .focus() / .select() / execCommand all work reliably.
-    const _mmDoCopy = text => {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        navigator.clipboard.writeText(text).catch(() => _mmExecCopy(text));
-      } else {
-        _mmExecCopy(text);
-      }
-    };
-    const _mmExecCopy = text => {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.cssText = 'position:fixed;left:-9999px;top:50%;width:1px;height:1px;opacity:0;pointer-events:none;';
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      try { document.execCommand('copy'); } catch (_) {}
-      document.body.removeChild(ta);
-    };
+    // Strategy: select the real <input readonly> element already in the shadow
+    // DOM, then call execCommand('copy') on the active selection — far more
+    // reliable in HA's shadow DOM context than injecting a ghost textarea.
+    // Also tries the async Clipboard API as a belt-and-braces second attempt.
     root.querySelectorAll('.mm-copy-btn').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        const url = btn.dataset.copy || '';
-        const orig = btn.innerHTML;
-        btn.innerHTML = '&#10003;&nbsp;Copied!';
+        const url      = btn.dataset.copy   || '';
+        const inputId  = btn.dataset.inputId;
+        const inputEl  = inputId ? root.getElementById(inputId) : null;
+
+        // 1. Select the input text so execCommand has something to act on
+        if (inputEl) {
+          inputEl.focus();
+          inputEl.select();
+          inputEl.setSelectionRange(0, inputEl.value.length); // iOS
+        }
+
+        // 2. Try execCommand first — works on the already-selected input in the DOM
+        let copied = false;
+        try { copied = document.execCommand('copy'); } catch (_) {}
+
+        // 3. Belt-and-braces: also fire the async Clipboard API (works where execCommand doesn't)
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          navigator.clipboard.writeText(url).catch(() => {});
+        }
+
+        // 4. Always show visual feedback immediately — green tick on button
+        const origText = btn.textContent;
+        btn.textContent = '✓ Copied!';
         btn.style.background = '#34C759';
-        btn.style.transform = 'scale(0.94)';
+        btn.style.transform  = 'scale(0.94)';
         btn.style.transition = 'background 0.15s, transform 0.15s';
         btn.disabled = true;
         setTimeout(() => {
-          btn.innerHTML = orig;
+          btn.textContent = origText;
           btn.style.background = '#007AFF';
-          btn.style.transform = '';
+          btn.style.transform  = '';
           btn.disabled = false;
         }, 2200);
-        _mmDoCopy(url);
       });
     });
 
