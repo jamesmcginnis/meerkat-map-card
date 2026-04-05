@@ -32,7 +32,7 @@ Tap any POI marker to see its name, category, address, opening hours, phone (tap
 
 ## POI status ring
 
-A small ring in the bottom-left corner shows the current loading state at all times. It breathes yellow while fetching, pulses green on success, and fades from red back to white on failure. The centre button stops an active fetch or opens a confirmation prompt to clear all cached POI data and download fresh information from OpenStreetMap.
+A small ring beneath the map controls in the top-right corner shows the current loading state at all times. It breathes yellow while fetching, pulses green on success, and fades from red back to white on failure. The centre button stops an active fetch or opens a confirmation prompt to clear all cached POI data and download fresh information from OpenStreetMap.
 
 ## iPhone and iPad
 
