@@ -1656,12 +1656,29 @@ class MeerkatMapCard extends HTMLElement {
       const errs = err?.errors || [err];
       const codes = errs.map(e => e?.code).filter(Boolean);
 
+      // If every category in this batch already has data in the accumulator,
+      // render from cache and clear the in-flight flags silently — no need to
+      // surface any error or retry the network at all.
+      const _renderFromCache = () => {
+        toFetch.forEach(cat => {
+          this._renderPOILayer(cat, []);
+          if (this._poiFetching) this._poiFetching[cat.key] = false;
+        });
+        this._poiRingEnd(gen);
+      };
+      const _allCached = () => toFetch.every(cat =>
+        this._poiAllElements?.[cat.key] &&
+        Object.keys(this._poiAllElements[cat.key]).length > 0
+      );
+
       if (codes.includes('rate_limit')) {
+        if (_allCached()) { _renderFromCache(); return; }
         const retryAfter = errs.find(e => e?.retryAfter)?.retryAfter || 60;
         this._showAPIInfoSheet('rate_limit', retryAfter);
         fail(); return;
       }
       if (codes.includes('busy') || codes.every(c => c === 'timeout')) {
+        if (_allCached()) { _renderFromCache(); return; }
         this._showAPIInfoSheet('busy');
         fail(); return;
       }
@@ -1669,9 +1686,11 @@ class MeerkatMapCard extends HTMLElement {
       // Unknown error — auto-retry once after 3 seconds (catches transient failures)
       setTimeout(() => {
         if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
+        if (_allCached()) { _renderFromCache(); return; }
         toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
         this._fetchOverpass(encodedQ, signal).then(finish).catch(retryErr => {
           if (signal?.aborted) { fail(); return; }
+          if (_allCached()) { _renderFromCache(); return; }
           const retryCodes = (retryErr?.errors || [retryErr]).map(e => e?.code).filter(Boolean);
           if (retryCodes.includes('rate_limit')) {
             const retryAfter = (retryErr?.errors || [retryErr]).find(e => e?.retryAfter)?.retryAfter || 60;
