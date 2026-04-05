@@ -445,35 +445,37 @@ class MeerkatMapCard extends HTMLElement {
         @keyframes mmSpin { to { transform: rotate(360deg); } }
         /* Leaflet overrides inside shadow root */
         .leaflet-control-zoom { display: none !important; }
-        /* POI status ring — sits in the top-right controls column */
+        /* POI status ring — always visible, bottom-left */
         #mm-poi-ring {
-          position: relative;
-          width: 40px; height: 40px;
+          position: absolute; bottom: 12px; left: 12px;
+          width: 56px; height: 56px;
           pointer-events: auto; z-index: 1500;
+          /* no opacity fade — always present */
         }
-        /* SVG ring layer — rotated so arc starts at top, halo extends slightly beyond button */
+        /* SVG ring layer — rotated so arc starts at top */
         #mm-poi-ring > svg {
-          position: absolute;
-          top: -4px; left: -4px;
-          width: 48px; height: 48px;
+          position: absolute; inset: 0;
+          width: 56px; height: 56px;
           transform: rotate(-90deg);
           pointer-events: none;
         }
-        /* Button matches the other mm-ctrl-btn controls exactly */
+        /* Button sits inside the ring, centred, matches card ctrl aesthetic */
         #mm-ring-btn {
-          width: 40px; height: 40px;
-          border-radius: 12px;
+          position: absolute;
+          top: 50%; left: 50%;
+          transform: translate(-50%, -50%);
+          width: 32px; height: 32px;
+          border-radius: 50%;
           border: none; cursor: pointer;
           display: flex; align-items: center; justify-content: center;
           backdrop-filter: blur(20px) saturate(180%);
           -webkit-backdrop-filter: blur(20px) saturate(180%);
-          box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
           transition: transform 0.15s;
           padding: 0;
-          position: relative; z-index: 1;
         }
-        #mm-ring-btn:active { transform: scale(0.92); }
-        #mm-ring-btn svg { width: 20px; height: 20px; display: block; flex-shrink: 0; }
+        #mm-ring-btn:active { transform: translate(-50%,-50%) scale(0.88); }
+        #mm-ring-btn svg { width: 14px; height: 14px; display: block; flex-shrink: 0; }
         @keyframes mmRingBreathe {
           0%, 100% { opacity: 0.9; stroke-width: 3; }
           50%       { opacity: 0.45; stroke-width: 2.2; }
@@ -508,23 +510,23 @@ class MeerkatMapCard extends HTMLElement {
             <button class="mm-ctrl-btn" id="mm-poi-btn" title="Points of interest">
               <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/></svg>
             </button>
-            <div id="mm-poi-ring">
-              <svg viewBox="0 0 56 56" fill="none">
-                <circle id="mm-ring-track" cx="28" cy="28" r="22"
-                  stroke="rgba(255,255,255,0.15)" stroke-width="3" fill="none"/>
-                <circle id="mm-ring-arc" cx="28" cy="28" r="22"
-                  stroke="rgba(255,255,255,0.8)" stroke-width="3" fill="none"
-                  stroke-linecap="round"
-                  style="transition:stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1);"/>
-              </svg>
-              <button id="mm-ring-btn" title="Refresh POI data">
-                <!-- icon injected by JS -->
-              </button>
-            </div>
           </div>
           <div id="mm-loading">
             <div class="mm-spinner"></div>
             <span>Loading map…</span>
+          </div>
+          <div id="mm-poi-ring">
+            <svg viewBox="0 0 56 56" fill="none">
+              <circle id="mm-ring-track" cx="28" cy="28" r="22"
+                stroke="rgba(255,255,255,0.15)" stroke-width="3" fill="none"/>
+              <circle id="mm-ring-arc" cx="28" cy="28" r="22"
+                stroke="rgba(255,255,255,0.8)" stroke-width="3" fill="none"
+                stroke-linecap="round"
+                style="transition:stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1);"/>
+            </svg>
+            <button id="mm-ring-btn" title="Refresh POI data">
+              <!-- icon injected by JS -->
+            </button>
           </div>
         </div>
       </ha-card>`;
@@ -560,8 +562,6 @@ class MeerkatMapCard extends HTMLElement {
       b.style.background = bg;
       b.style.color      = color;
     });
-    const ringBtn = this.shadowRoot.getElementById('mm-ring-btn');
-    if (ringBtn) { ringBtn.style.background = bg; ringBtn.style.color = color; }
   }
 
   // ── Map init ─────────────────────────────────────────────────────
@@ -700,15 +700,16 @@ class MeerkatMapCard extends HTMLElement {
         // mmPOIAll: data from localStorage, so this is a pure Leaflet render.
         this._restorePOIsFromCache();
 
-        // Only trigger a network prefetch if at least one enabled category
-        // has not been fetched for the current area yet. _isAreaFetched checks
-        // both the in-memory region index and mmPOIFetched:cat in localStorage.
+        // Only trigger a network prefetch if at least one enabled category has
+        // no accumulated data at all. Categories that already have cached data
+        // are rendered immediately from the accumulator and never refetched
+        // automatically — use the ring button to force a fresh download.
         const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-        const mapB = this._map.getBounds();
-        const bs = mapB.getSouth(), bw = mapB.getWest(), bn = mapB.getNorth(), be = mapB.getEast();
-        const allFetched = enabled.length === 0 ||
-          enabled.every(cat => this._isAreaFetched(cat, bs, bw, bn, be));
-        if (!allFetched) {
+        const anyMissing = enabled.some(cat =>
+          !this._poiAllElements?.[cat.key] ||
+          Object.keys(this._poiAllElements[cat.key]).length === 0
+        );
+        if (anyMissing) {
           // Wait 3 s before the first network fetch. Cancel if moveend fires first.
           this._initFetchTimer = setTimeout(() => { this._initFetchTimer = null; this._prefetchPOIs(); }, 3000);
         }
@@ -1418,14 +1419,15 @@ class MeerkatMapCard extends HTMLElement {
     // Update last fetch bounds (used by moveend to skip redundant reloads)
     this._lastFetchBounds = { s, w, n, e };
 
-    // Determine which categories still need a network fetch for this area.
-    // _isAreaFetched checks the lightweight mmPOIFetched:cat regions list,
-    // which records bounding boxes of every previously fetched area. The
-    // actual data is always served from the global accumulator (_poiAllElements)
-    // so the layer continues to show all cached markers during any fetch.
+    // Determine which categories need a network fetch.
+    // Only fetch categories that have no accumulated data at all — if any markers
+    // exist in the cache for a category (regardless of which region they came from),
+    // render from cache and skip the network. Use the ring button to force a refresh.
     const needsFetch = [];
     for (const cat of enabled) {
-      if (!this._isAreaFetched(cat, s, w, n, e)) needsFetch.push(cat);
+      const hasData = this._poiAllElements?.[cat.key] &&
+                      Object.keys(this._poiAllElements[cat.key]).length > 0;
+      if (!hasData) needsFetch.push(cat);
     }
 
     if (!needsFetch.length) return;
