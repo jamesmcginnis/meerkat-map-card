@@ -15,7 +15,7 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 - **Sharing** — track additional people, devices, or any GPS entity alongside yourself; each appears as its own marker with its current address and distance from you
 - **Points of interest** — 53 categories across 8 groups, fetched from OpenStreetMap via Overpass API
 - **Persistent POI caching** — all fetched POIs accumulate across every area you visit; panning and zooming never causes previously loaded markers to disappear, and revisiting any location restores markers instantly from cache with no network request
-- **POI status ring** — always-visible indicator showing loading, success, and error states with a centre button to stop or refresh
+- **POI status ring** — indicator beneath the map controls showing loading, success, and error states with a centre button to stop or refresh
 - **POI popup** — tap any POI to see name, category, address, distance from person, opening hours, phone (tap to call — a styled confirmation sheet appears before dialling), website (icon clickable), and any available extra details such as cuisine, wheelchair access, fees, operator, brand, and network
 - **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
@@ -176,7 +176,7 @@ The 53 categories are organised into 8 groups in the visual editor:
 
 ## POI Status Ring
 
-A small ring in the bottom-left corner of the map shows the current state of POI data loading:
+A small ring beneath the map controls in the top-right corner of the map shows the current state of POI data loading:
 
 | State       | Colour            | Meaning                                       |
 |-------------|-------------------|-----------------------------------------------|
