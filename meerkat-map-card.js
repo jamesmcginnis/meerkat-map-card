@@ -2530,34 +2530,82 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
-        <!-- Overpass API Mirrors -->
+        <!-- HA Web Proxy Setup -->
         <div>
-          <div class="section-title">Overpass API Mirrors</div>
-          <div class="hint" style="margin-bottom:6px;">POI data is fetched from OpenStreetMap via Overpass API. The card races all five mirrors simultaneously and uses whichever responds first. On iOS, or if you see fetch errors, install the <a href="https://github.com/dermotduffy/hass-web-proxy-integration" target="_blank" rel="noopener" style="color:#007AFF;text-decoration:none;font-weight:600;">HA Web Proxy</a> integration and add each URL pattern below — this routes requests through your Home Assistant server, bypassing browser restrictions.</div>
+          <div class="section-title">🔌 Web Proxy Setup</div>
+          <div class="hint" style="margin-bottom:6px;">Required on iOS & tablets — routes map data through your Home Assistant server so it's never blocked.</div>
           <div class="card-block">
-            <div style="padding:14px 16px 10px;">
-              <div style="font-size:12px;font-weight:600;color:var(--secondary-text-color);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;">How to add a mirror</div>
-              <div style="font-size:13px;color:var(--primary-text-color);line-height:1.6;margin-bottom:12px;">In <strong>Settings → Integrations</strong>, install <em>HA Web Proxy</em>. Open its options and click <strong>+ ADD</strong> for each URL pattern below. The <code style="font-size:11px;background:rgba(128,128,128,0.15);border-radius:4px;padding:1px 5px;">*</code> wildcard is required so the proxy also allows the query string the card appends to each request.</div>
-              <div style="display:flex;flex-direction:column;gap:6px;">
-                ${[
-                  { label: 'Official',       flag: '🇩🇪', url: 'https://overpass-api.de/api/interpreter*',                 note: 'Germany' },
-                  { label: 'Kumi Systems',   flag: '🇪🇺', url: 'https://overpass.kumi.systems/api/interpreter*',           note: 'Europe' },
-                  { label: 'Mail.ru',        flag: '🇷🇺', url: 'https://maps.mail.ru/osm/tools/overpass/api/interpreter*', note: 'Russia' },
-                  { label: 'OSM Russia',     flag: '🇷🇺', url: 'https://overpass.openstreetmap.ru/api/interpreter*',       note: 'Russia' },
-                  { label: 'OSM Switzerland',flag: '🇨🇭', url: 'https://overpass.osm.ch/api/interpreter*',                 note: 'Switzerland' },
-                ].map(m => `
-                  <div style="background:rgba(128,128,128,0.08);border-radius:10px;padding:10px 12px;">
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                      <span style="font-size:15px;">${m.flag}</span>
-                      <span style="font-size:13px;font-weight:600;color:var(--primary-text-color);">${m.label}</span>
-                      <span style="font-size:11px;color:var(--secondary-text-color);margin-left:auto;">${m.note}</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:6px;">
-                      <code style="flex:1;font-size:11px;word-break:break-all;background:rgba(128,128,128,0.13);border-radius:6px;padding:5px 8px;color:var(--primary-text-color);font-family:ui-monospace,monospace;">${m.url}</code>
-                      <button data-copy="${m.url}" style="flex-shrink:0;padding:5px 10px;border:none;border-radius:6px;background:#007AFF;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">Copy</button>
-                    </div>
-                  </div>`).join('')}
+            <div style="padding:14px 16px 6px;">
+              <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:8px;">What is this and why do I need it?</div>
+              <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.6;margin-bottom:12px;">
+                When you open this card on an iPhone or iPad, the browser blocks connections to external map servers for security reasons. The <strong>Home Assistant Web Proxy</strong> integration solves this — it acts as a relay, fetching map data through your Home Assistant server instead.
+                <br><br>
+                ✅ &nbsp;Works on iOS, Android &amp; desktop<br>
+                ✅ &nbsp;Takes about 2 minutes to set up<br>
+                ✅ &nbsp;Free, open-source, no account needed
               </div>
+
+              <!-- Step 1 -->
+              <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start;">
+                <div style="min-width:24px;height:24px;border-radius:50%;background:#007AFF;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">1</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Install the integration</div>
+                  <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;margin-bottom:6px;">Add it via HACS or manually from the GitHub repo. Restart Home Assistant once installed.</div>
+                  <a href="https://github.com/dend/hass-web-proxy-integration" target="_blank" rel="noopener"
+                    style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(0,122,255,0.12);color:#007AFF;border:1px solid rgba(0,122,255,0.25);border-radius:10px;font-size:12px;font-weight:600;text-decoration:none;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>
+                    View on GitHub → hass-web-proxy-integration
+                  </a>
+                </div>
+              </div>
+
+              <!-- Step 2 -->
+              <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start;">
+                <div style="min-width:24px;height:24px;border-radius:50%;background:#007AFF;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">2</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Allow the Overpass servers in your config</div>
+                  <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;margin-bottom:8px;">
+                    Open your <code style="background:rgba(0,0,0,0.1);padding:1px 5px;border-radius:4px;font-size:11px;">configuration.yaml</code> and add each server URL below to the proxy's <code style="background:rgba(0,0,0,0.1);padding:1px 5px;border-radius:4px;font-size:11px;">allowed_domains</code> list. Copy each one using the button next to it.
+                  </div>
+
+                  <!-- Mirror list with copy buttons -->
+                  ${[
+                    { label: 'Main (Germany)',     url: 'https://overpass-api.de' },
+                    { label: 'Kumi Systems',       url: 'https://overpass.kumi.systems' },
+                    { label: 'Mail.ru (Russia)',   url: 'https://maps.mail.ru' },
+                    { label: 'OpenStreetMap (RU)', url: 'https://overpass.openstreetmap.ru' },
+                    { label: 'OSM Switzerland',    url: 'https://overpass.osm.ch' },
+                  ].map((m, i) => `
+                    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(0,0,0,0.04);border-radius:9px;margin-bottom:6px;${i===0?'border:1px solid rgba(52,199,89,0.35);':'border:1px solid rgba(128,128,128,0.1);'}">
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:11px;font-weight:600;color:var(--secondary-text-color);margin-bottom:1px;">${i===0?'⭐ ':''} ${m.label}</div>
+                        <div style="font-size:11px;font-family:monospace;color:var(--primary-text-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.url}</div>
+                      </div>
+                      <button class="mm-copy-btn" data-copy="${m.url}" style="flex-shrink:0;padding:6px 10px;border:none;border-radius:8px;background:#007AFF;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;">Copy</button>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+
+              <!-- Step 3 -->
+              <div style="display:flex;gap:10px;margin-bottom:8px;align-items:flex-start;">
+                <div style="min-width:24px;height:24px;border-radius:50%;background:#007AFF;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">3</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Restart Home Assistant</div>
+                  <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;">
+                    After saving your <code style="background:rgba(0,0,0,0.1);padding:1px 5px;border-radius:4px;font-size:11px;">configuration.yaml</code>, do a full restart of Home Assistant. The map will then route all requests through your HA server automatically — no further config needed!
+                  </div>
+                </div>
+              </div>
+
+              <!-- Info tip -->
+              <div style="display:flex;gap:8px;padding:10px 12px;background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.25);border-radius:10px;margin-top:8px;margin-bottom:4px;">
+                <span style="font-size:16px;flex-shrink:0;">💡</span>
+                <div style="font-size:11px;color:var(--secondary-text-color);line-height:1.55;">
+                  <strong style="color:var(--primary-text-color);">Don't have HACS?</strong> No problem — you can install the integration manually by copying the <code style="background:rgba(0,0,0,0.12);padding:1px 4px;border-radius:3px;">hass_web_proxy</code> folder from the GitHub repo into your <code style="background:rgba(0,0,0,0.12);padding:1px 4px;border-radius:3px;">custom_components</code> directory.
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
@@ -2744,19 +2792,6 @@ class MeerkatMapCardEditor extends HTMLElement {
   _setupListeners() {
     const root = this.shadowRoot;
 
-    // Mirror URL copy buttons
-    root.querySelectorAll('button[data-copy]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        navigator.clipboard?.writeText(btn.dataset.copy).then(() => {
-          btn.textContent = '✓';
-          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-        }).catch(() => {
-          btn.textContent = '✓';
-          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-        });
-      });
-    });
-
     root.getElementById('person_entity').onchange  = e => this._updateConfig('person_entity',  e.target.value);
     if (root.getElementById('geocoded_entity')) root.getElementById('geocoded_entity').onchange = e => this._updateConfig('geocoded_entity', e.target.value);
     root.querySelectorAll('input[name="dist"]').forEach(r => r.onchange = () => this._updateConfig('distance_unit', r.value));
@@ -2774,6 +2809,30 @@ class MeerkatMapCardEditor extends HTMLElement {
 
     const ttlSel = root.getElementById('cache_ttl_hours');
     if (ttlSel) ttlSel.onchange = e => this._updateConfig('cache_ttl_hours', parseInt(e.target.value));
+
+    // Copy-to-clipboard buttons for proxy mirror URLs
+    root.querySelectorAll('.mm-copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const url = btn.dataset.copy || '';
+        navigator.clipboard.writeText(url).then(() => {
+          const orig = btn.textContent;
+          btn.textContent = '✓ Copied!';
+          btn.style.background = '#34C759';
+          setTimeout(() => { btn.textContent = orig; btn.style.background = '#007AFF'; }, 2000);
+        }).catch(() => {
+          // Fallback for older browsers / non-secure contexts
+          const ta = document.createElement('textarea');
+          ta.value = url; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
+          document.body.appendChild(ta); ta.focus(); ta.select();
+          try { document.execCommand('copy'); } catch (_) {}
+          document.body.removeChild(ta);
+          const orig = btn.textContent;
+          btn.textContent = '✓ Copied!';
+          btn.style.background = '#34C759';
+          setTimeout(() => { btn.textContent = orig; btn.style.background = '#007AFF'; }, 2000);
+        });
+      });
+    });
 
     const clearBtn = root.getElementById('mm-clear-cache-btn');
     const cacheSizeEl = root.getElementById('mm-cache-size');
