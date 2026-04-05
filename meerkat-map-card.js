@@ -2533,20 +2533,18 @@ class MeerkatMapCardEditor extends HTMLElement {
         <!-- Overpass API Mirrors -->
         <div>
           <div class="section-title">Overpass API Mirrors</div>
-          <div class="hint" style="margin-bottom:6px;">POI data is fetched from OpenStreetMap via Overpass API. The card races all five mirrors simultaneously and uses whichever responds first. On iOS or if you see fetch errors, install the <a href="https://github.com/dermotduffy/hass-web-proxy-integration" target="_blank" rel="noopener" style="color:#007AFF;text-decoration:none;font-weight:600;">HA Web Proxy</a> integration and add each URL pattern below — this routes requests through your Home Assistant server, bypassing browser restrictions.</div>
+          <div class="hint" style="margin-bottom:6px;">POI data is fetched from OpenStreetMap via Overpass API. The card races all five mirrors simultaneously and uses whichever responds first. On iOS, or if you see fetch errors, install the <a href="https://github.com/dermotduffy/hass-web-proxy-integration" target="_blank" rel="noopener" style="color:#007AFF;text-decoration:none;font-weight:600;">HA Web Proxy</a> integration and add each URL pattern below — this routes requests through your Home Assistant server, bypassing browser restrictions.</div>
           <div class="card-block">
-            <div style="padding:14px 16px 6px;">
-              <div style="font-size:12px;font-weight:600;color:var(--secondary-text-color);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em;">How to add a mirror</div>
-              <div style="font-size:13px;color:var(--primary-text-color);line-height:1.6;margin-bottom:12px;">
-                In <strong>Settings → Integrations</strong>, install <em>HA Web Proxy</em>. Open its options and click <strong>+ ADD</strong> for each URL pattern below.
-              </div>
-              <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+            <div style="padding:14px 16px 10px;">
+              <div style="font-size:12px;font-weight:600;color:var(--secondary-text-color);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;">How to add a mirror</div>
+              <div style="font-size:13px;color:var(--primary-text-color);line-height:1.6;margin-bottom:12px;">In <strong>Settings → Integrations</strong>, install <em>HA Web Proxy</em>. Open its options and click <strong>+ ADD</strong> for each URL pattern below. The <code style="font-size:11px;background:rgba(128,128,128,0.15);border-radius:4px;padding:1px 5px;">*</code> wildcard is required so the proxy also allows the query string the card appends to each request.</div>
+              <div style="display:flex;flex-direction:column;gap:6px;">
                 ${[
-                  { label: 'Official',          flag: '🇩🇪', url: 'https://overpass-api.de/api/interpreter*',                  note: 'Primary — Germany' },
-                  { label: 'Kumi Systems',       flag: '🇪🇺', url: 'https://overpass.kumi.systems/api/interpreter*',            note: 'Europe' },
-                  { label: 'Mail.ru',            flag: '🇷🇺', url: 'https://maps.mail.ru/osm/tools/overpass/api/interpreter*',  note: 'Russia' },
-                  { label: 'OSM Russia',         flag: '🇷🇺', url: 'https://overpass.openstreetmap.ru/api/interpreter*',        note: 'Russia' },
-                  { label: 'OSM Switzerland',    flag: '🇨🇭', url: 'https://overpass.osm.ch/api/interpreter*',                  note: 'Switzerland' },
+                  { label: 'Official',       flag: '🇩🇪', url: 'https://overpass-api.de/api/interpreter*',                 note: 'Germany' },
+                  { label: 'Kumi Systems',   flag: '🇪🇺', url: 'https://overpass.kumi.systems/api/interpreter*',           note: 'Europe' },
+                  { label: 'Mail.ru',        flag: '🇷🇺', url: 'https://maps.mail.ru/osm/tools/overpass/api/interpreter*', note: 'Russia' },
+                  { label: 'OSM Russia',     flag: '🇷🇺', url: 'https://overpass.openstreetmap.ru/api/interpreter*',       note: 'Russia' },
+                  { label: 'OSM Switzerland',flag: '🇨🇭', url: 'https://overpass.osm.ch/api/interpreter*',                 note: 'Switzerland' },
                 ].map(m => `
                   <div style="background:rgba(128,128,128,0.08);border-radius:10px;padding:10px 12px;">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
@@ -2749,8 +2747,7 @@ class MeerkatMapCardEditor extends HTMLElement {
     // Mirror URL copy buttons
     root.querySelectorAll('button[data-copy]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const url = btn.dataset.copy;
-        navigator.clipboard?.writeText(url).then(() => {
+        navigator.clipboard?.writeText(btn.dataset.copy).then(() => {
           btn.textContent = '✓';
           setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
         }).catch(() => {
@@ -2759,6 +2756,8 @@ class MeerkatMapCardEditor extends HTMLElement {
         });
       });
     });
+
+    root.getElementById('person_entity').onchange  = e => this._updateConfig('person_entity',  e.target.value);
     if (root.getElementById('geocoded_entity')) root.getElementById('geocoded_entity').onchange = e => this._updateConfig('geocoded_entity', e.target.value);
     root.querySelectorAll('input[name="dist"]').forEach(r => r.onchange = () => this._updateConfig('distance_unit', r.value));
     root.getElementById('map_height').oninput     = e => this._updateConfig('map_height', parseInt(e.target.value) || 420);
