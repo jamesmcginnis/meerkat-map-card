@@ -1656,29 +1656,12 @@ class MeerkatMapCard extends HTMLElement {
       const errs = err?.errors || [err];
       const codes = errs.map(e => e?.code).filter(Boolean);
 
-      // If every category in this batch already has data in the accumulator,
-      // render from cache and clear the in-flight flags silently — no need to
-      // surface any error or retry the network at all.
-      const _renderFromCache = () => {
-        toFetch.forEach(cat => {
-          this._renderPOILayer(cat, []);
-          if (this._poiFetching) this._poiFetching[cat.key] = false;
-        });
-        this._poiRingEnd(gen);
-      };
-      const _allCached = () => toFetch.every(cat =>
-        this._poiAllElements?.[cat.key] &&
-        Object.keys(this._poiAllElements[cat.key]).length > 0
-      );
-
       if (codes.includes('rate_limit')) {
-        if (_allCached()) { _renderFromCache(); return; }
         const retryAfter = errs.find(e => e?.retryAfter)?.retryAfter || 60;
         this._showAPIInfoSheet('rate_limit', retryAfter);
         fail(); return;
       }
       if (codes.includes('busy') || codes.every(c => c === 'timeout')) {
-        if (_allCached()) { _renderFromCache(); return; }
         this._showAPIInfoSheet('busy');
         fail(); return;
       }
@@ -1686,11 +1669,9 @@ class MeerkatMapCard extends HTMLElement {
       // Unknown error — auto-retry once after 3 seconds (catches transient failures)
       setTimeout(() => {
         if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
-        if (_allCached()) { _renderFromCache(); return; }
         toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
         this._fetchOverpass(encodedQ, signal).then(finish).catch(retryErr => {
           if (signal?.aborted) { fail(); return; }
-          if (_allCached()) { _renderFromCache(); return; }
           const retryCodes = (retryErr?.errors || [retryErr]).map(e => e?.code).filter(Boolean);
           if (retryCodes.includes('rate_limit')) {
             const retryAfter = (retryErr?.errors || [retryErr]).find(e => e?.retryAfter)?.retryAfter || 60;
@@ -1711,6 +1692,8 @@ class MeerkatMapCard extends HTMLElement {
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
+      `https://overpass.openstreetmap.ru/api/interpreter?data=${encodedQ}`,
+      `https://overpass.osm.ch/api/interpreter?data=${encodedQ}`,
     ];
     const tryFetch = url => {
       const timeout = new Promise((_, reject) => {
@@ -1754,28 +1737,7 @@ class MeerkatMapCard extends HTMLElement {
       const allMeaningful = codes.length > 0 && codes.every(
         c => c === 'busy' || c === 'rate_limit' || c === 'timeout'
       );
-      if (allMeaningful) {
-        // When all concurrent mirrors rate-limited, the simultaneous burst is
-        // the likely cause. Try each proxy mirror sequentially with a short
-        // gap — the per-IP limit on any one mirror usually clears within a
-        // few seconds. Only surface the error if every sequential attempt
-        // also fails, so the user never sees "Request Limit reached" unless
-        // the situation is truly unrecoverable.
-        if (codes.some(c => c === 'rate_limit')) {
-          for (const url of proxyUrls) {
-            if (signal?.aborted) throw new DOMException('', 'AbortError');
-            await new Promise(r => setTimeout(r, 3000));
-            if (signal?.aborted) throw new DOMException('', 'AbortError');
-            try {
-              return await tryFetch(url);
-            } catch (ex) {
-              // This mirror is still unhappy — try the next one.
-              if (ex?.code !== 'rate_limit' && ex?.code !== 'busy' && ex?.code !== 'timeout') throw ex;
-            }
-          }
-        }
-        throw e;
-      }
+      if (allMeaningful) throw e;
       // Otherwise the proxy is likely not installed or had a network error —
       // fall back to direct connections (works on desktop; blocked on iOS).
     }
@@ -2483,6 +2445,7 @@ class MeerkatMapCardEditor extends HTMLElement {
         <!-- Map Settings -->
         <div>
           <div class="section-title">Map Settings</div>
+          <div class="hint" style="margin-bottom:6px;">Height sets how tall the card appears on your dashboard. Zoom controls the default level when the card loads — 13 is neighbourhood, 15 is street level, 17 is building level.</div>
           <div class="card-block">
             <div class="input-row">
               <div class="two-col">
@@ -2502,6 +2465,7 @@ class MeerkatMapCardEditor extends HTMLElement {
         <!-- Theme -->
         <div>
           <div class="section-title">Map Theme</div>
+          <div class="hint" style="margin-bottom:6px;">Auto follows your Home Assistant theme. Dark is easier on the eyes at night; Light works better in bright environments.</div>
           <div class="card-block" style="padding:12px;">
             <div class="segmented">
               <input type="radio" name="theme" id="theme_dark"  value="dark"  ${(cfg.theme||'dark')==='dark'  ? 'checked' : ''}><label for="theme_dark">🌙 Dark</label>
@@ -2547,6 +2511,7 @@ class MeerkatMapCardEditor extends HTMLElement {
         <!-- POI Icon Size -->
         <div>
           <div class="section-title">POI Icon Size</div>
+          <div class="hint" style="margin-bottom:6px;">Controls the size of Points of Interest markers on the map. Smaller markers are less cluttered when many categories are enabled.</div>
           <div class="card-block" style="padding:12px;">
             <div class="segmented">
               <input type="radio" name="poi_icon_size" id="poi_size_small"  value="small"  ${(cfg.poi_icon_size||'medium')==='small'  ? 'checked' : ''}><label for="poi_size_small">Small</label>
@@ -2559,6 +2524,7 @@ class MeerkatMapCardEditor extends HTMLElement {
         <!-- Person Icon Size -->
         <div>
           <div class="section-title">Person Icon Size</div>
+          <div class="hint" style="margin-bottom:6px;">Controls the size of person and device markers. Larger markers are easier to tap on mobile; smaller ones keep the map less cluttered when tracking multiple people.</div>
           <div class="card-block" style="padding:12px;">
             <div class="segmented">
               <input type="radio" name="person_icon_size" id="person_size_small"  value="small"  ${(cfg.person_icon_size||'medium')==='small'  ? 'checked' : ''}><label for="person_size_small">Small</label>
@@ -2568,10 +2534,93 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
+        <!-- HA Web Proxy Setup -->
+        <div>
+          <div class="section-title">🔌 Web Proxy Setup</div>
+          <div class="hint" style="margin-bottom:6px;">Required on iOS & tablets — routes map data through your Home Assistant server so it's never blocked.</div>
+          <div class="card-block">
+            <div style="padding:14px 16px 10px;">
+              <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:8px;">What is this and why do I need it?</div>
+              <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.6;margin-bottom:14px;">
+                When you open this card on an iPhone or iPad, the browser blocks direct connections to external map servers. The <strong>HA Web Proxy</strong> integration solves this — it relays requests through your Home Assistant server so the map loads everywhere.
+                <br><br>
+                ✅ &nbsp;Works on iOS, Android &amp; desktop<br>
+                ✅ &nbsp;Takes about 2 minutes to set up<br>
+                ✅ &nbsp;Free &amp; open-source
+              </div>
+
+              <!-- Step 1 -->
+              <div style="display:flex;gap:10px;margin-bottom:14px;align-items:flex-start;">
+                <div style="min-width:24px;height:24px;border-radius:50%;background:#007AFF;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">1</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Install the integration via HACS</div>
+                  <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;margin-bottom:8px;">Search for <strong>HA Web Proxy</strong> in HACS and install it, then restart Home Assistant. You can also install it manually — full instructions are on GitHub.</div>
+                  <a href="https://github.com/dermotduffy/hass-web-proxy-integration" target="_blank" rel="noopener"
+                    style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(0,122,255,0.12);color:#007AFF;border:1px solid rgba(0,122,255,0.25);border-radius:10px;font-size:12px;font-weight:600;text-decoration:none;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>
+                    GitHub → hass-web-proxy-integration
+                  </a>
+                </div>
+              </div>
+
+              <!-- Step 2 -->
+              <div style="display:flex;gap:10px;margin-bottom:14px;align-items:flex-start;">
+                <div style="min-width:24px;height:24px;border-radius:50%;background:#007AFF;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">2</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">Add the Overpass mirrors to the proxy</div>
+                  <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;margin-bottom:8px;">
+                    Go to <strong>Settings → Devices &amp; Services → HA Web Proxy</strong> and add each URL below as an allowed endpoint. Copy each one with the button — they must end in <code style="background:rgba(0,0,0,0.1);padding:1px 5px;border-radius:4px;font-size:11px;">/*</code> to allow all paths on that server.
+                  </div>
+
+                  <!-- Mirror list with copy buttons -->
+                  ${[
+                    { label: 'Main (Germany)',     url: 'https://overpass-api.de/*' },
+                    { label: 'Kumi Systems',       url: 'https://overpass.kumi.systems/*' },
+                    { label: 'Mail.ru (Russia)',   url: 'https://maps.mail.ru/*' },
+                    { label: 'OpenStreetMap (RU)', url: 'https://overpass.openstreetmap.ru/*' },
+                    { label: 'OSM Switzerland',    url: 'https://overpass.osm.ch/*' },
+                  ].map((m, i) => `
+                    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(0,0,0,0.04);border-radius:9px;margin-bottom:6px;${i===0?'border:1px solid rgba(52,199,89,0.35);':'border:1px solid rgba(128,128,128,0.1);'}">
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:11px;font-weight:600;color:var(--secondary-text-color);margin-bottom:3px;">${i===0?'⭐ ':''}${m.label}</div>
+                        <input id="mm-mirror-url-${i}" type="text" readonly value="${m.url}"
+                          style="width:100%;background:transparent;border:none;outline:none;padding:0;font-size:11px;font-family:monospace;color:var(--primary-text-color);cursor:text;caret-color:transparent;"
+                          onclick="this.select()">
+                      </div>
+                      <button class="mm-copy-btn" data-copy="${m.url}" data-input-id="mm-mirror-url-${i}"
+                        style="flex-shrink:0;padding:6px 10px;border:none;border-radius:8px;background:#007AFF;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;">Copy</button>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+
+              <!-- Step 3 -->
+              <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start;">
+                <div style="min-width:24px;height:24px;border-radius:50%;background:#34C759;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">✓</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px;">That's it!</div>
+                  <div style="font-size:12px;color:var(--secondary-text-color);line-height:1.5;">
+                    No restart needed. The card will automatically route all Overpass requests through your HA server from now on.
+                  </div>
+                </div>
+              </div>
+
+              <!-- Info tip -->
+              <div style="display:flex;gap:8px;padding:10px 12px;background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.25);border-radius:10px;margin-top:4px;margin-bottom:4px;">
+                <span style="font-size:16px;flex-shrink:0;">💡</span>
+                <div style="font-size:11px;color:var(--secondary-text-color);line-height:1.55;">
+                  <strong style="color:var(--primary-text-color);">Don't have HACS?</strong> You can install the integration manually — copy the <code style="background:rgba(0,0,0,0.12);padding:1px 4px;border-radius:3px;">hass_web_proxy</code> folder from the GitHub repo into your <code style="background:rgba(0,0,0,0.12);padding:1px 4px;border-radius:3px;">custom_components</code> directory and restart Home Assistant.
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
         <!-- Points of Interest -->
         <div>
           <div class="section-title">Points of Interest</div>
-          <div class="hint" style="margin-bottom:6px;">Toggle categories. Data from OpenStreetMap via Overpass API.</div>
+          <div class="hint" style="margin-bottom:6px;">Toggle categories to show nearby places on the map. Data is fetched from OpenStreetMap via the Overpass API and cached on-device — tap any marker to see its name and details.</div>
           ${MM_POI_GROUPS.map(group => `
           <div style="margin-bottom:10px;">
             <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--secondary-text-color);padding:6px 0 2px;">${group.label}</div>
@@ -2767,6 +2816,50 @@ class MeerkatMapCardEditor extends HTMLElement {
 
     const ttlSel = root.getElementById('cache_ttl_hours');
     if (ttlSel) ttlSel.onchange = e => this._updateConfig('cache_ttl_hours', parseInt(e.target.value));
+
+    // ── Copy-to-clipboard for proxy mirror URLs ──────────────────────
+    // Strategy: select the real <input readonly> element already in the shadow
+    // DOM, then call execCommand('copy') on the active selection — far more
+    // reliable in HA's shadow DOM context than injecting a ghost textarea.
+    // Also tries the async Clipboard API as a belt-and-braces second attempt.
+    root.querySelectorAll('.mm-copy-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const url      = btn.dataset.copy   || '';
+        const inputId  = btn.dataset.inputId;
+        const inputEl  = inputId ? root.getElementById(inputId) : null;
+
+        // 1. Select the input text so execCommand has something to act on
+        if (inputEl) {
+          inputEl.focus();
+          inputEl.select();
+          inputEl.setSelectionRange(0, inputEl.value.length); // iOS
+        }
+
+        // 2. Try execCommand first — works on the already-selected input in the DOM
+        let copied = false;
+        try { copied = document.execCommand('copy'); } catch (_) {}
+
+        // 3. Belt-and-braces: also fire the async Clipboard API (works where execCommand doesn't)
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          navigator.clipboard.writeText(url).catch(() => {});
+        }
+
+        // 4. Always show visual feedback immediately — green tick on button
+        const origText = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        btn.style.background = '#34C759';
+        btn.style.transform  = 'scale(0.94)';
+        btn.style.transition = 'background 0.15s, transform 0.15s';
+        btn.disabled = true;
+        setTimeout(() => {
+          btn.textContent = origText;
+          btn.style.background = '#007AFF';
+          btn.style.transform  = '';
+          btn.disabled = false;
+        }, 2200);
+      });
+    });
 
     const clearBtn = root.getElementById('mm-clear-cache-btn');
     const cacheSizeEl = root.getElementById('mm-cache-size');
