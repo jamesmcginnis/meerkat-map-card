@@ -695,14 +695,21 @@ class MeerkatMapCard extends HTMLElement {
         this._restorePOIsFromCache();
 
         // Only trigger a network prefetch if at least one enabled category has
-        // no accumulated data at all. Categories that already have cached data
-        // are rendered immediately from the accumulator and never refetched
-        // automatically — use the ring button to force a fresh download.
+        // no accumulated data, OR its fetched-region records are all expired.
+        // Categories with valid cached data render from the accumulator immediately
+        // and are never refetched automatically — use the ring button to force a refresh.
         const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-        const anyMissing = enabled.some(cat =>
-          !this._poiAllElements?.[cat.key] ||
-          Object.keys(this._poiAllElements[cat.key]).length === 0
-        );
+        const now = Date.now();
+        const ttl = this._cacheTTL;
+        const anyMissing = enabled.some(cat => {
+          // No data at all → definitely need a fetch
+          if (!this._poiAllElements?.[cat.key] ||
+              Object.keys(this._poiAllElements[cat.key]).length === 0) return true;
+          // Data exists but all fetched-region records are expired → stale, refetch
+          const regions = this._fetchedRegions?.[cat.key];
+          if (!regions || regions.length === 0) return false; // unknown age, keep cached data
+          return regions.every(r => now - r.ts >= ttl);
+        });
         if (anyMissing) {
           // Wait 3 s before the first network fetch. Cancel if moveend fires first.
           this._initFetchTimer = setTimeout(() => { this._initFetchTimer = null; this._prefetchPOIs(); }, 3000);
@@ -1793,21 +1800,28 @@ class MeerkatMapCard extends HTMLElement {
     // that previously fetched POIs are never lost when the viewport moves.
     if (!this._poiAllElements) this._poiAllElements = {};
     if (!this._poiAllElements[cat.key]) this._poiAllElements[cat.key] = {};
+    let newCount = 0;
     for (const el of elements) {
       // Use OSM id when available; fall back to a lat/lon string so that
       // elements without an id (rare but possible) are still stored.
       const eid = el.id != null
         ? String(el.id)
         : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
-      if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
+      if (eid && eid !== 'undefined') {
+        this._poiAllElements[cat.key][eid] = el;
+        newCount++;
+      }
     }
-    // Persist global store so it survives a full app close/reopen.
-    // _mmStorageSet handles QuotaExceededError by evicting older mmPOI* entries
-    // before retrying, so the cache is not silently lost when storage is full.
-    _mmStorageSet(
-      `mmPOIAll:${cat.key}`,
-      JSON.stringify(Object.values(this._poiAllElements[cat.key]))
-    );
+    // Only persist to localStorage when new data was actually merged.
+    // Skipping the write on cache-restore calls (elements=[]) avoids N
+    // redundant writes on every cold start — each write risks triggering
+    // quota-eviction that could silently discard another category's data.
+    if (newCount > 0) {
+      _mmStorageSet(
+        `mmPOIAll:${cat.key}`,
+        JSON.stringify(Object.values(this._poiAllElements[cat.key]))
+      );
+    }
 
     // ── Build markers from ALL accumulated elements ─────────────────
     const sizeMap = { small: 20, medium: 28, large: 36 };
