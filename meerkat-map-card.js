@@ -1753,31 +1753,42 @@ class MeerkatMapCard extends HTMLElement {
         Object.keys(this._poiAllElements[cat.key]).length > 0
       );
 
-      if (code === 'rate_limit') {
+      if (code === 'rate_limit' || code === 'busy' || code === 'timeout') {
         if (_allCached()) { _renderFromCache(); return; }
-        this._showAPIInfoSheet('rate_limit', err.retryAfter || 60);
-        fail(); return;
-      }
-      if (code === 'busy' || code === 'timeout') {
-        if (_allCached()) { _renderFromCache(); return; }
-        this._showAPIInfoSheet('busy');
-        fail(); return;
+        // Silent retry after a short pause before showing the error sheet.
+        // Many rate-limit responses clear within a few seconds; showing the
+        // sheet immediately on the first failure is unnecessarily alarming.
+        const retryDelay = code === 'rate_limit' ? 5000 : 3000;
+        setTimeout(() => {
+          if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
+          if (_allCached()) { _renderFromCache(); return; }
+          toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
+          this._fetchOverpass(encodedQ, signal).then(finish).catch(retryErr => {
+            if (signal?.aborted) { fail(); return; }
+            if (_allCached()) { _renderFromCache(); return; }
+            // Only show the sheet after both attempts have failed
+            const retryCode = retryErr?.code;
+            if (retryCode === 'rate_limit') {
+              this._showAPIInfoSheet('rate_limit', retryErr.retryAfter || 60);
+            } else {
+              this._showAPIInfoSheet('busy');
+            }
+            fail();
+          });
+        }, retryDelay);
+        return;
       }
 
-      // Unknown/network error — auto-retry once after 3 s (catches transient failures)
+      // Unknown/network error — auto-retry once after 3 s (catches transient failures).
+      // The sheet is NOT shown on the retry path — if the first attempt already
+      // showed it, a second sheet would appear after the user dismissed the first.
       setTimeout(() => {
         if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
         if (_allCached()) { _renderFromCache(); return; }
         toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
-        this._fetchOverpass(encodedQ, signal).then(finish).catch(retryErr => {
+        this._fetchOverpass(encodedQ, signal).then(finish).catch(() => {
           if (signal?.aborted) { fail(); return; }
           if (_allCached()) { _renderFromCache(); return; }
-          const retryCode = retryErr?.code;
-          if (retryCode === 'rate_limit') {
-            this._showAPIInfoSheet('rate_limit', retryErr.retryAfter || 60);
-          } else if (retryCode === 'busy' || retryCode === 'timeout') {
-            this._showAPIInfoSheet('busy');
-          }
           fail();
         });
       }, 3000);
