@@ -184,6 +184,16 @@ const MM_POI_GROUPS = [
 // Flat list for iteration (backwards compatible)
 const MM_POIS = MM_POI_GROUPS.flatMap(g => g.pois);
 
+// ── POI fetch zoom gate ────────────────────────────────────────────
+// Below this Leaflet zoom level the viewport covers too large an area for
+// Overpass to handle reasonably. At zoom 12 the viewport is roughly 20 km
+// across — large enough that a single Overpass request can return tens of
+// thousands of nodes, exhaust the API quota, saturate mobile data, and blow
+// the localStorage budget. Zoom 13 (~10 km) is a safe upper bound.
+// POI fetches, cache writes, and layer rendering are all blocked below this
+// level; existing cached markers are hidden until the user zooms back in.
+const MM_MIN_POI_ZOOM = 13;
+
 // ── Tile Layer URLs ────────────────────────────────────────────────
 const MM_TILES = {
   dark:  { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',      attr: '© OpenStreetMap contributors © CARTO' },
@@ -480,6 +490,19 @@ class MeerkatMapCard extends HTMLElement {
           background: ${bg}; color: ${isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'};
           font-size: 13px; font-weight: 500;
         }
+        /* Zoom-out notice — shown when zoom < MM_MIN_POI_ZOOM */
+        #mm-zoom-notice {
+          display: none;
+          position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+          z-index: 1500; pointer-events: none;
+          background: ${isDark ? 'rgba(28,28,30,0.82)' : 'rgba(255,255,255,0.82)'};
+          backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%);
+          border: 1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)'};
+          border-radius: 20px; padding: 7px 14px;
+          font-size: 12px; font-weight: 500; white-space: nowrap;
+          color: ${isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.55)'};
+        }
+        #mm-zoom-notice.mm-zoom-notice-visible { display: block; }
         .mm-spinner {
           width: 28px; height: 28px; border-radius: 50%;
           border: 3px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'};
@@ -522,6 +545,7 @@ class MeerkatMapCard extends HTMLElement {
             <div class="mm-spinner"></div>
             <span>Loading map…</span>
           </div>
+          <div id="mm-zoom-notice">🔍 Zoom in to load points of interest</div>
         </div>
       </ha-card>`;
 
@@ -558,7 +582,30 @@ class MeerkatMapCard extends HTMLElement {
     });
   }
 
-  // ── Map init ─────────────────────────────────────────────────────
+  // ── Zoom gate ─────────────────────────────────────────────────────
+  _isTooZoomedOut() {
+    return this._map && this._map.getZoom() < MM_MIN_POI_ZOOM;
+  }
+
+  _updateZoomNotice() {
+    const el = this.shadowRoot && this.shadowRoot.getElementById('mm-zoom-notice');
+    if (!el) return;
+    const tooFar = this._isTooZoomedOut();
+    el.classList.toggle('mm-zoom-notice-visible', tooFar);
+    // Hide all POI layers when zoomed out — they'd be a meaningless dense cluster
+    // anyway, and keeping them visible would just be confusing.
+    for (const cat of MM_POIS) {
+      const layer = this._poiLayers[cat.key];
+      if (!layer) continue;
+      if (tooFar) {
+        if (this._map.hasLayer(layer)) this._map.removeLayer(layer);
+      } else {
+        if (!this._map.hasLayer(layer)) layer.addTo(this._map);
+      }
+    }
+  }
+
+
   async _initMap() {
     if (this._mapInitialised || this._mapIniting) return;
     this._mapIniting = true;
@@ -630,9 +677,16 @@ class MeerkatMapCard extends HTMLElement {
 
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
+        // Update the zoom-out notice and layer visibility on every move/zoom
+        this._updateZoomNotice();
+
         // Cancel the post-init 3 s fetch timer — the moveend handler takes over.
         if (this._initFetchTimer) { clearTimeout(this._initFetchTimer); this._initFetchTimer = null; }
         clearTimeout(this._poiDebounce);
+
+        // Don't fetch if zoomed out too far — the area would be enormous
+        if (this._isTooZoomedOut()) return;
+
         // 2500ms debounce: generous pause so the user can keep scrolling
         // without triggering a fetch on every momentary stop
         this._poiDebounce = setTimeout(() => {
@@ -688,11 +742,15 @@ class MeerkatMapCard extends HTMLElement {
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
         this._updateMap();
+        this._updateZoomNotice();
 
         // Render all cached POI layers immediately from the in-memory accumulator.
         // _warmCacheFromStorage (called from setConfig) has already loaded all
         // mmPOIAll: data from localStorage, so this is a pure Leaflet render.
-        this._restorePOIsFromCache();
+        // Skip if zoomed out — layers would be immediately hidden anyway.
+        if (!this._isTooZoomedOut()) {
+          this._restorePOIsFromCache();
+        }
 
         // Only trigger a network prefetch if at least one enabled category has
         // no accumulated data, OR its fetched-region records are all expired.
@@ -710,7 +768,7 @@ class MeerkatMapCard extends HTMLElement {
           if (!regions || regions.length === 0) return false; // unknown age, keep cached data
           return regions.every(r => now - r.ts >= ttl);
         });
-        if (anyMissing) {
+        if (anyMissing && !this._isTooZoomedOut()) {
           // Wait 3 s before the first network fetch. Cancel if moveend fires first.
           this._initFetchTimer = setTimeout(() => { this._initFetchTimer = null; this._prefetchPOIs(); }, 3000);
         }
@@ -1380,6 +1438,10 @@ class MeerkatMapCard extends HTMLElement {
   // ── POI loading ───────────────────────────────────────────────────
   async _loadAllPOIs(ps, pw, pn, pe) {
     if (!this._mapInitialised || !this._map) return;
+    // Never fetch when zoomed out too far — the bounding box would be enormous
+    // and Overpass would either time out or return millions of results.
+    if (this._isTooZoomedOut()) return;
+
     // Accept pre-computed bounds (from _prefetchPOIs) or compute with 15% buffer
     const bounds = this._map.getBounds();
     let s, w, n, e;
@@ -1475,6 +1537,7 @@ class MeerkatMapCard extends HTMLElement {
   // when the user pans a short distance the data is already cached.
   async _prefetchPOIs() {
     if (!this._mapInitialised || !this._map) return;
+    if (this._isTooZoomedOut()) return;
     const b  = this._map.getBounds();
     const vs = b.getSouth(), vw = b.getWest(), vn = b.getNorth(), ve = b.getEast();
     const latPad = (vn - vs) * 0.25;
@@ -2219,6 +2282,37 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   _confirmRefreshPOIs() {
+    // Don't allow a manual refresh when zoomed out too far — the request
+    // would cover a huge area and almost certainly hit the Overpass rate limit.
+    if (this._isTooZoomedOut()) {
+      const isDark = this._isDark();
+      const bg  = isDark ? 'rgba(28,28,30,0.96)' : 'rgba(252,252,254,0.98)';
+      const tx  = isDark ? '#fff' : '#000';
+      const sub = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)';
+      const bd  = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `position:fixed;inset:0;z-index:99999;display:flex;align-items:flex-end;justify-content:center;padding:0 0 24px;background:rgba(0,0,0,0.5);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);`;
+      const sheet = document.createElement('style');
+      sheet.textContent = `@keyframes mmSlideUp{from{transform:translateY(24px) scale(0.97);opacity:0}to{transform:none;opacity:1}}`;
+      overlay.appendChild(sheet);
+      const panel = document.createElement('div');
+      panel.style.cssText = `background:${bg};backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:1px solid ${bd};border-radius:24px;padding:28px 24px 20px;width:calc(100% - 32px);max-width:400px;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;color:${tx};animation:mmSlideUp 0.28s cubic-bezier(0.34,1.3,0.64,1);text-align:center;`;
+      panel.innerHTML = `
+        <div style="font-size:36px;margin-bottom:14px;">🔍</div>
+        <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:10px;">Zoom in first</div>
+        <div style="font-size:14px;color:${sub};line-height:1.5;margin-bottom:24px;">
+          Points of interest are only loaded when you're zoomed in enough. Zoom in to level ${MM_MIN_POI_ZOOM} or above to load and refresh POI data.
+        </div>
+        <button id="mm-zoom-sheet-ok" style="width:100%;padding:14px;border:none;border-radius:14px;background:#007AFF;color:#fff;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;">Got it</button>
+      `;
+      overlay.appendChild(panel);
+      document.body.appendChild(overlay);
+      const close = () => overlay.remove();
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+      panel.querySelector('#mm-zoom-sheet-ok').addEventListener('click', close);
+      return;
+    }
+
     const isDark   = this._isDark();
     const bg       = isDark ? 'rgba(28,28,30,0.96)' : 'rgba(252,252,254,0.98)';
     const tx       = isDark ? '#fff' : '#000';
