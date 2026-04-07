@@ -253,6 +253,8 @@ class MeerkatMapCard extends HTMLElement {
     // Lightweight in-memory record of which areas have been fetched per category.
     // Mirrors mmPOIFetched:cat in localStorage. Decouples fetch-decision from data.
     this._fetchedRegions = {};
+    this._batchTimers = [];      // stagger setTimeout IDs — cleared on each new round
+    this._retryTimers = new Set(); // retry setTimeout IDs — cleared on pan/abort
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -436,7 +438,7 @@ class MeerkatMapCard extends HTMLElement {
     this._mapIniting     = false;  // must reset or re-init is blocked
     this._poiPending      = 0;
     this._lastFetchBounds = null;
-    if (this._fetchAbortCtrl) { this._fetchAbortCtrl.abort(); this._fetchAbortCtrl = null; }
+    this._cancelAllPendingFetches();
     if (this._cacheClearedHandler) {
       window.removeEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
       this._cacheClearedHandler = null;
@@ -708,10 +710,9 @@ class MeerkatMapCard extends HTMLElement {
             return;
           }
 
-          // Cancel any in-flight requests for the old location
-          if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
-          this._fetchAbortCtrl = new AbortController();
-          this._poiFetching = {};
+          // Cancel all in-flight requests and pending timers for the old location,
+          // then start fresh for the new viewport.
+          this._cancelAllPendingFetches();
           this._loadAllPOIs();
         }, 2500);
       });
@@ -1492,13 +1493,10 @@ class MeerkatMapCard extends HTMLElement {
     this._loadGen = (this._loadGen || 0) + 1;
     const gen = this._loadGen;
 
-    if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
+    // Cancel anything still pending from a previous round before starting fresh.
+    this._cancelAllPendingFetches();
     this._fetchAbortCtrl = new AbortController();
     const signal = this._fetchAbortCtrl.signal;
-
-    // Reset the in-flight guard so that flags left over from the aborted
-    // fetch never cause categories to be silently skipped in the new round.
-    this._poiFetching = {};
 
     // Reset ring for this generation
     this._ringGen   = gen;
@@ -1513,16 +1511,20 @@ class MeerkatMapCard extends HTMLElement {
     // Overpass fair-use policy while still loading all categories quickly.
     const BATCH = 5;
     const BATCH_DELAY_MS = 1200;
+    this._batchTimers = [];
     for (let i = 0; i < needsFetch.length; i += BATCH) {
       const batchSlice = needsFetch.slice(i, i + BATCH);
       const delay = (i / BATCH) * BATCH_DELAY_MS;
       if (delay === 0) {
         this._loadPOIBatch(batchSlice, s, w, n, e, signal, gen);
       } else {
-        setTimeout(() => {
+        const tid = setTimeout(() => {
+          // Remove this timer from the tracked set now that it has fired
+          this._batchTimers = this._batchTimers.filter(t => t !== tid);
           if (signal.aborted || gen !== this._loadGen) return;
           this._loadPOIBatch(batchSlice, s, w, n, e, signal, gen);
         }, delay);
+        this._batchTimers.push(tid);
       }
     }
   }
@@ -1695,7 +1697,8 @@ class MeerkatMapCard extends HTMLElement {
         // Many rate-limit responses clear within a few seconds; showing the
         // sheet immediately on the first failure is unnecessarily alarming.
         const retryDelay = code === 'rate_limit' ? 5000 : 3000;
-        setTimeout(() => {
+        const retryId = setTimeout(() => {
+          this._retryTimers.delete(retryId);
           if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
           if (_allCached()) { _renderFromCache(); return; }
           toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
@@ -1712,13 +1715,15 @@ class MeerkatMapCard extends HTMLElement {
             fail();
           });
         }, retryDelay);
+        if (this._retryTimers) this._retryTimers.add(retryId);
         return;
       }
 
       // Unknown/network error — auto-retry once after 3 s (catches transient failures).
       // The sheet is NOT shown on the retry path — if the first attempt already
       // showed it, a second sheet would appear after the user dismissed the first.
-      setTimeout(() => {
+      const unknownRetryId = setTimeout(() => {
+        this._retryTimers.delete(unknownRetryId);
         if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
         if (_allCached()) { _renderFromCache(); return; }
         toFetch.forEach(c => { if (this._poiFetching) this._poiFetching[c.key] = true; });
@@ -1728,6 +1733,7 @@ class MeerkatMapCard extends HTMLElement {
           fail();
         });
       }, 3000);
+      if (this._retryTimers) this._retryTimers.add(unknownRetryId);
     });
   }
 
@@ -2256,9 +2262,19 @@ class MeerkatMapCard extends HTMLElement {
     panel.querySelector('#mm-api-sheet-ok').addEventListener('click', close);
   }
 
-  _stopFetch() {
-    if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
+  // Cancel everything: in-flight HTTP requests, stagger timers, retry timers.
+  // Called on pan, zoom, manual stop, and disconnectedCallback.
+  _cancelAllPendingFetches() {
+    if (this._fetchAbortCtrl) { this._fetchAbortCtrl.abort(); this._fetchAbortCtrl = null; }
+    // Clear staggered batch timers
+    if (this._batchTimers) { this._batchTimers.forEach(id => clearTimeout(id)); this._batchTimers = []; }
+    // Clear retry timers
+    if (this._retryTimers) { this._retryTimers.forEach(id => clearTimeout(id)); this._retryTimers.clear(); }
     this._poiFetching = {};
+  }
+
+  _stopFetch() {
+    this._cancelAllPendingFetches();
     this._ringTotal = 0; this._ringDone = 0;
     this._setRingState('idle');
   }
@@ -2335,9 +2351,8 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   _forceRefreshPOIs() {
-    // Abort any in-flight requests
-    if (this._fetchAbortCtrl) this._fetchAbortCtrl.abort();
-    this._poiFetching = {};
+    // Cancel all in-flight requests and pending timers
+    this._cancelAllPendingFetches();
     this._poiElements = {};  // clear in-memory cache so stale data cannot be restored
     this._poiElementsBounds = null;
     this._lastFetchBounds = null; // bypass bounds check
