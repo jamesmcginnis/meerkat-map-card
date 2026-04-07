@@ -690,39 +690,22 @@ class MeerkatMapCard extends HTMLElement {
         // 2500ms debounce: generous pause so the user can keep scrolling
         // without triggering a fetch on every momentary stop
         this._poiDebounce = setTimeout(() => {
-          const b = this._map.getBounds();
-          const f = this._lastFetchBounds;
+          const b  = this._map.getBounds();
+          const bs = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
+          const f  = this._lastFetchBounds;
           // Skip if new view fits inside the last fetched area
           if (f &&
-              b.getSouth() >= f.s && b.getNorth() <= f.n &&
-              b.getWest()  >= f.w && b.getEast()  <= f.e) return;
+              bs >= f.s && bn <= f.n &&
+              bw >= f.w && be <= f.e) return;
 
-          // Skip if every enabled category is already covered by the
-          // in-memory accumulator or a valid localStorage cache entry —
-          // no network request needed even if _lastFetchBounds doesn't cover it.
           const enabled = MM_POIS.filter(c => this._config[c.key]);
-          if (enabled.length > 0) {
-            const bs = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
-            const allCovered = enabled.every(cat => {
-              // In-memory global accumulator has data for this category
-              if (this._poiAllElements && this._poiAllElements[cat.key] &&
-                  Object.keys(this._poiAllElements[cat.key]).length > 0) return true;
-              // Valid localStorage cache entry (exact or nearby fallback)
-              try {
-                const raw = localStorage.getItem(this._poiCacheKey(cat, bs, bw, bn, be));
-                if (raw) {
-                  const { ts } = JSON.parse(raw);
-                  if (Date.now() - ts < this._cacheTTL) return true;
-                }
-              } catch (_) {}
-              return this._poiCacheFallback(cat, bs, bw, bn, be) !== null;
-            });
-            if (allCovered) {
-              // Data is cached — just re-render layers for the new viewport,
-              // no network activity required.
-              this._loadAllPOIs();
-              return;
-            }
+
+          // Check whether every enabled category has already been fetched for
+          // this viewport (using the authoritative _isAreaFetched check).
+          // If so, just re-render from the accumulator — no network needed.
+          if (enabled.length > 0 && enabled.every(cat => this._isAreaFetched(cat, bs, bw, bn, be))) {
+            this._loadAllPOIs();
+            return;
           }
 
           // Cancel any in-flight requests for the old location
@@ -1483,15 +1466,11 @@ class MeerkatMapCard extends HTMLElement {
     this._lastFetchBounds = { s, w, n, e };
 
     // Determine which categories need a network fetch.
-    // Only fetch categories that have no accumulated data at all — if any markers
-    // exist in the cache for a category (regardless of which region they came from),
-    // render from cache and skip the network. Use the ring button to force a refresh.
-    const needsFetch = [];
-    for (const cat of enabled) {
-      const hasData = this._poiAllElements?.[cat.key] &&
-                      Object.keys(this._poiAllElements[cat.key]).length > 0;
-      if (!hasData) needsFetch.push(cat);
-    }
+    // A category needs fetching only if it has never been fetched for this
+    // viewport, OR its fetched-region record has expired (TTL elapsed).
+    // Categories already covered by a valid region are rendered from the
+    // accumulator and skipped — the ring button forces a full refresh.
+    const needsFetch = enabled.filter(cat => !this._isAreaFetched(cat, s, w, n, e));
 
     if (!needsFetch.length) return;
 
@@ -1577,49 +1556,6 @@ class MeerkatMapCard extends HTMLElement {
         this._renderPOILayer(cat, []);
       }
     }
-  }
-
-  _poiCacheKey(cat, s, w, n, e) {
-    // toFixed(3) ≈ 110m grid — fine enough to reuse when zoomed into a street
-    return `mmPOI:${cat.key}:${(+s).toFixed(3)},${(+w).toFixed(3)},${(+n).toFixed(3)},${(+e).toFixed(3)}`;
-  }
-
-  // Find the best overlapping cache entry for this category ─────────
-  _poiCacheFallback(cat, s, w, n, e) {
-    try {
-      const prefix = `mmPOI:${cat.key}:`;
-      const ttl = this._cacheTTL;
-      let bestElements = null;
-      let bestOverlap = 0;
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k || !k.startsWith(prefix)) continue;
-        const parts = k.slice(prefix.length).split(',');
-        if (parts.length !== 4) continue;
-        const [cs, cw, cn, ce] = parts.map(Number);
-        // Use overlap check instead of mid-point: cached bounds must overlap the
-        // requested bounds AND cover the mid-point of the requested area.
-        const midLat = (s + n) / 2, midLng = (w + e) / 2;
-        const overlaps = cs <= n && cn >= s && cw <= e && ce >= w;
-        const coversMid = midLat >= cs && midLat <= cn && midLng >= cw && midLng <= ce;
-        if (!overlaps || !coversMid) continue;
-        // Pick the entry with the largest overlap area
-        const overlapArea = (Math.min(cn, n) - Math.max(cs, s)) * (Math.min(ce, e) - Math.max(cw, w));
-        if (overlapArea <= bestOverlap) continue;
-        const raw = localStorage.getItem(k);
-        if (raw) {
-          try {
-            const { ts, elements } = JSON.parse(raw);
-            if (Date.now() - ts < ttl) {
-              bestElements = elements;
-              bestOverlap = overlapArea;
-            }
-          } catch (_) {}
-        }
-      }
-      return bestElements;
-    } catch (_) {}
-    return null;
   }
 
   // ── Fetched-region helpers ────────────────────────────────────────
