@@ -489,53 +489,13 @@ class MeerkatMapCard extends HTMLElement {
         @keyframes mmSpin { to { transform: rotate(360deg); } }
         /* Leaflet overrides inside shadow root */
         .leaflet-control-zoom { display: none !important; }
-        /* POI status ring — always visible, bottom-left */
-        #mm-poi-ring {
-          position: absolute; bottom: 12px; left: 12px;
-          width: 56px; height: 56px;
-          pointer-events: auto; z-index: 1500;
-          /* no opacity fade — always present */
-        }
-        /* SVG ring layer — rotated so arc starts at top */
-        #mm-poi-ring > svg {
-          position: absolute; inset: 0;
-          width: 56px; height: 56px;
-          transform: rotate(-90deg);
-          pointer-events: none;
-        }
-        /* Button sits inside the ring, centred, matches card ctrl aesthetic */
-        #mm-ring-btn {
-          position: absolute;
-          top: 50%; left: 50%;
-          transform: translate(-50%, -50%);
-          width: 32px; height: 32px;
-          border-radius: 50%;
-          border: none; cursor: pointer;
-          display: flex; align-items: center; justify-content: center;
-          backdrop-filter: blur(20px) saturate(180%);
-          -webkit-backdrop-filter: blur(20px) saturate(180%);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-          transition: transform 0.15s;
-          padding: 0;
-        }
-        #mm-ring-btn:active { transform: translate(-50%,-50%) scale(0.88); }
-        #mm-ring-btn svg { width: 14px; height: 14px; display: block; flex-shrink: 0; }
-        @keyframes mmRingBreathe {
-          0%, 100% { opacity: 0.9; stroke-width: 3; }
-          50%       { opacity: 0.45; stroke-width: 2.2; }
-        }
-        @keyframes mmRingSuccess {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.5; }
-        }
-        @keyframes mmRingFadeToIdle {
-          0%   { stroke: #FF3B30; opacity: 1; }
-          60%  { stroke: #FF3B30; opacity: 0.7; }
-          100% { stroke: rgba(255,255,255,0.35); opacity: 1; }
-        }
-        #mm-poi-ring.mm-ring-loading #mm-ring-arc { animation: mmRingBreathe 1.6s ease-in-out infinite; }
-        #mm-poi-ring.mm-ring-success #mm-ring-arc { animation: mmRingSuccess 0.5s ease-in-out 3; }
-        #mm-poi-ring.mm-ring-error-fade #mm-ring-arc { animation: mmRingFadeToIdle 3s ease-in-out forwards; }
+        /* Refresh button state colours */
+        #mm-ring-btn.mm-ring-loading { color: #FFCC00 !important; }
+        #mm-ring-btn.mm-ring-success { color: #34C759 !important; }
+        #mm-ring-btn.mm-ring-error   { color: #FF3B30 !important; }
+        #mm-ring-btn.mm-ring-loading svg { animation: mmRingSpin 1s linear infinite; }
+        @keyframes mmRingSpin { to { transform: rotate(360deg); } }
+
         .leaflet-attribution-container a { color: ${accent}; }
       </style>
       <ha-card>
@@ -554,23 +514,13 @@ class MeerkatMapCard extends HTMLElement {
             <button class="mm-ctrl-btn" id="mm-poi-btn" title="Points of interest">
               <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/></svg>
             </button>
+            <button class="mm-ctrl-btn" id="mm-ring-btn" title="Refresh POI data">
+              <!-- icon injected by _setRingState -->
+            </button>
           </div>
           <div id="mm-loading">
             <div class="mm-spinner"></div>
             <span>Loading map…</span>
-          </div>
-          <div id="mm-poi-ring">
-            <svg viewBox="0 0 56 56" fill="none">
-              <circle id="mm-ring-track" cx="28" cy="28" r="22"
-                stroke="rgba(255,255,255,0.15)" stroke-width="3" fill="none"/>
-              <circle id="mm-ring-arc" cx="28" cy="28" r="22"
-                stroke="rgba(255,255,255,0.8)" stroke-width="3" fill="none"
-                stroke-linecap="round"
-                style="transition:stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1);"/>
-            </svg>
-            <button id="mm-ring-btn" title="Refresh POI data">
-              <!-- icon injected by JS -->
-            </button>
           </div>
         </div>
       </ha-card>`;
@@ -2117,46 +2067,40 @@ class MeerkatMapCard extends HTMLElement {
     });
   }
 
-  // ── POI loading ring ─────────────────────────────────────────────
-  // Uses a generation counter so that aborted/stale fetch callbacks
-  // from a previous pan never affect the current ring state.
-  // ── POI status ring ───────────────────────────────────────────────
-  // States: idle (white), loading (yellow+pulse), success (green+pulse→idle), error (red+pulse)
-  // r=22, circumference = 2π×22 ≈ 138.23
-  static get _RING_CIRC() { return 2 * Math.PI * 22; }
+  // ── POI refresh button state ──────────────────────────────────────
+  // The refresh button lives in #mm-controls alongside the other ctrl buttons.
+  // States: idle | loading (spinning, yellow) | success (green, auto-reverts) | error (red, auto-reverts)
+  // A generation counter ensures stale fetch callbacks don't corrupt the state.
   get _cacheTTL() { return ((this._config && this._config.cache_ttl_hours) || 48) * 3600000; }
 
-  _ringEl()  { return this.shadowRoot && this.shadowRoot.getElementById('mm-poi-ring'); }
-  _arcEl()   { return this.shadowRoot && this.shadowRoot.getElementById('mm-ring-arc'); }
-  _btnEl()   { return this.shadowRoot && this.shadowRoot.getElementById('mm-ring-btn'); }
+  _btnEl() { return this.shadowRoot && this.shadowRoot.getElementById('mm-ring-btn'); }
+  // Keep _ringEl / _arcEl as no-ops so legacy call-sites don't throw
+  _ringEl() { return null; }
+  _arcEl()  { return null; }
+
+  // SVG icons for each state — sized to match the other ctrl buttons (20×20)
+  static get _ICON_IDLE()    { return '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="currentColor"/></svg>'; }
+  static get _ICON_LOADING() { return '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="currentColor"/></svg>'; }
+  static get _ICON_STOP()    { return '<svg viewBox="0 0 24 24" width="20" height="20"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>'; }
+  static get _ICON_SUCCESS() { return '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" fill="currentColor"/></svg>'; }
+  static get _ICON_ERROR()   { return '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="currentColor"/></svg>'; }
 
   _setRingState(state) {
-    // state: 'idle' | 'loading' | 'success' | 'error'
     this._ringState = state;
-    const ring = this._ringEl(), arc = this._arcEl(), btn = this._btnEl();
-    if (!ring || !arc || !btn) return;
+    const btn = this._btnEl();
+    if (!btn) return;
 
-    ring.classList.remove('mm-ring-loading', 'mm-ring-success', 'mm-ring-error');
-    const circ = MeerkatMapCard._RING_CIRC;
+    btn.classList.remove('mm-ring-loading', 'mm-ring-success', 'mm-ring-error');
 
     if (state === 'loading') {
-      ring.classList.add('mm-ring-loading');
-      arc.setAttribute('stroke', '#FFCC00');
-      arc.style.transition = 'none';
-      arc.style.strokeDasharray = `0 ${circ}`;
-      void arc.getBoundingClientRect();
-      arc.style.transition = 'stroke-dasharray 0.7s cubic-bezier(0.4,0,0.2,1)';
-      btn.style.background = 'rgba(30,30,34,0.75)';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="#FFCC00"/></svg>';
+      btn.classList.add('mm-ring-loading');
+      btn.innerHTML = MeerkatMapCard._ICON_STOP;
       btn.title = 'Stop loading';
       btn.onclick = () => { this._stopFetch(); };
 
     } else if (state === 'success') {
-      ring.classList.add('mm-ring-success');
-      arc.setAttribute('stroke', '#34C759');
-      arc.style.strokeDasharray = `${circ} 0`;
-      btn.style.background = 'rgba(30,30,34,0.75)';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="#34C759"/></svg>';
+      btn.classList.add('mm-ring-success');
+      btn.innerHTML = MeerkatMapCard._ICON_SUCCESS;
       btn.title = 'Refresh POI data';
       btn.onclick = () => { this._confirmRefreshPOIs(); };
       clearTimeout(this._ringFadeTimer);
@@ -2165,25 +2109,17 @@ class MeerkatMapCard extends HTMLElement {
       }, 2000);
 
     } else if (state === 'error') {
-      // Full red ring, then fade to idle over 3s
-      arc.setAttribute('stroke', '#FF3B30');
-      arc.style.strokeDasharray = `${circ} 0`;
-      ring.classList.add('mm-ring-error-fade');
-      btn.style.background = 'rgba(30,30,34,0.75)';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="#FF3B30"/></svg>';
+      btn.classList.add('mm-ring-error');
+      btn.innerHTML = MeerkatMapCard._ICON_ERROR;
       btn.title = 'Retry loading POI data';
       btn.onclick = () => { this._confirmRefreshPOIs(); };
-      // Auto-transition to idle after fade completes
       clearTimeout(this._ringFadeTimer);
       this._ringFadeTimer = setTimeout(() => {
         if (this._ringState === 'error') this._setRingState('idle');
       }, 3200);
 
     } else { // idle
-      arc.setAttribute('stroke', 'rgba(255,255,255,0.35)');
-      arc.style.strokeDasharray = `${circ} 0`;
-      btn.style.background = 'rgba(30,30,34,0.75)';
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8z" fill="rgba(255,255,255,0.65)"/></svg>';
+      btn.innerHTML = MeerkatMapCard._ICON_IDLE;
       btn.title = 'Refresh POI data';
       btn.onclick = () => { this._confirmRefreshPOIs(); };
     }
@@ -2348,19 +2284,13 @@ class MeerkatMapCard extends HTMLElement {
 
   _updatePoiRing(gen) {
     if (gen !== undefined && gen !== this._ringGen) return;
-    const arc = this._arcEl();
-    if (!arc) return;
 
     const total = this._ringTotal || 0;
     const done  = this._ringDone  || 0;
     if (total === 0) return;
 
-    const circ     = MeerkatMapCard._RING_CIRC;
-    const progress = done / total;
-    const filled   = circ * progress;
-
+    // Ensure the button shows the loading state (spinning)
     if (this._ringState !== 'loading') this._setRingState('loading');
-    arc.style.strokeDasharray = `${filled} ${circ - filled}`;
 
     if (done >= total) {
       clearTimeout(this._ringFadeTimer);
