@@ -27,6 +27,52 @@ async function _mmFetchCSS(url) {
   return text;
 }
 
+// ── Safe localStorage helper with quota-aware LRU eviction ─────────
+// localStorage on mobile (especially iOS Safari in private browsing, or when
+// the browser storage quota is full) throws QuotaExceededError on setItem.
+// Rather than silently swallowing those errors (which leaves the in-memory
+// cache warm but the on-disk cache empty, so the next cold load fetches
+// everything again), we:
+//   1. Try a normal setItem.
+//   2. On quota failure, evict the oldest mmPOI* entries until there is room,
+//      then retry once.
+//   3. If still failing, return false so the caller knows the write failed.
+function _mmStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    // Not a quota error — nothing we can do.
+    if (!e || (e.name !== 'QuotaExceededError' && e.name !== 'NS_ERROR_DOM_QUOTA_REACHED')) return false;
+  }
+  // Evict oldest mmPOI* entries (by oldest mmPOIFetched timestamp, then mmPOIAll, then mmPOI)
+  try {
+    // Collect evictable keys with a rough age signal
+    const evictable = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith('mmPOIFetched:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOI:')) {
+        // Prefer evicting fetched-region indexes (cheapest to regenerate) first,
+        // then per-key data blobs. Within each tier, evict the largest entry.
+        const tier = k.startsWith('mmPOIFetched:') ? 0 : k.startsWith('mmPOIAll:') ? 1 : 2;
+        const size = (localStorage.getItem(k) || '').length;
+        evictable.push({ k, tier, size });
+      }
+    }
+    // Sort: lowest tier (most expendable) first, then largest size first
+    evictable.sort((a, b) => a.tier - b.tier || b.size - a.size);
+    for (const { k } of evictable) {
+      localStorage.removeItem(k);
+      try {
+        localStorage.setItem(key, value);
+        return true; // freed enough space
+      } catch (_) {} // keep evicting
+    }
+  } catch (_) {}
+  return false;
+}
+
 // ── Tag matcher: assigns batch-fetched elements back to categories ──
 // Called after a single batch response to split the flat element list
 // into per-category buckets. Most-specific category in MM_POIS wins.
@@ -301,13 +347,16 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Cache warm-up ─────────────────────────────────────────────────
   // Reads mmPOIAll: (element data) and mmPOIFetched: (region records) from
-  // localStorage into memory for every currently enabled category.
+  // localStorage into memory.  We warm ALL categories, not just enabled ones,
+  // so that:
+  //   (a) toggling a category on instantly shows cached markers, and
+  //   (b) a network switch (WiFi → Mobile) that reconnects the card element
+  //       never causes a false "cache empty" state for enabled categories.
   // Called from setConfig so the data is ready before the map initialises.
   _warmCacheFromStorage() {
     if (!this._poiAllElements) this._poiAllElements = {};
     if (!this._fetchedRegions)  this._fetchedRegions  = {};
-    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-    for (const cat of enabled) {
+    for (const cat of MM_POIS) {
       // Accumulator — skip if already in memory
       if (!this._poiAllElements[cat.key] ||
           Object.keys(this._poiAllElements[cat.key]).length === 0) {
@@ -360,16 +409,11 @@ class MeerkatMapCard extends HTMLElement {
         // Use localStorage so position survives full app close/reopen
         localStorage.setItem('mmMapPos', JSON.stringify(payload));
       } catch (_) {}
-      // Persist in-memory POI elements to localStorage so they survive full app close.
-      // sessionStorage is wiped on app close so we can't rely on it for persistence.
-      try {
-        if (this._poiElements && Object.keys(this._poiElements).length > 0) {
-          localStorage.setItem('mmPOIElements', JSON.stringify(this._poiElements));
-        }
-        if (this._poiElementsBounds) {
-          localStorage.setItem('mmPOIElementsBounds', JSON.stringify(this._poiElementsBounds));
-        }
-      } catch (_) {}
+      // mmPOIAll: keys are written incrementally by _renderPOILayer (using
+      // _mmStorageSet with eviction), so they are already up-to-date on disk.
+      // Do NOT write the bulky mmPOIElements legacy key here — it duplicates
+      // mmPOIAll: data and consumes extra quota that is the primary reason
+      // the cache appears cleared after a WiFi→Mobile network switch.
       this._map.remove();
       this._map          = null;
       this._tileLayer    = null;
@@ -1596,11 +1640,16 @@ class MeerkatMapCard extends HTMLElement {
     this._fetchedRegions[cat.key].push(entry);
     try {
       const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
-      const arr = raw ? JSON.parse(raw) : [];
+      let arr = raw ? JSON.parse(raw) : [];
       arr.push(entry);
-      // Cap at 200 entries per category to keep localStorage footprint bounded
-      if (arr.length > 200) arr.splice(0, arr.length - 200);
-      localStorage.setItem(`mmPOIFetched:${cat.key}`, JSON.stringify(arr));
+      // Prune expired entries first (they are worthless disk space)
+      const ttl = this._cacheTTL;
+      const now = Date.now();
+      arr = arr.filter(r => now - r.ts < ttl);
+      // Then cap at 50 entries per category (was 200 — the extra entries
+      // never help cache-hit rate and waste quota budget)
+      if (arr.length > 50) arr.splice(0, arr.length - 50);
+      _mmStorageSet(`mmPOIFetched:${cat.key}`, JSON.stringify(arr));
     } catch (_) {}
   }
 
@@ -1802,13 +1851,13 @@ class MeerkatMapCard extends HTMLElement {
         : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
       if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
     }
-    // Persist global store so it survives a full app close/reopen
-    try {
-      localStorage.setItem(
-        `mmPOIAll:${cat.key}`,
-        JSON.stringify(Object.values(this._poiAllElements[cat.key]))
-      );
-    } catch (_) {}
+    // Persist global store so it survives a full app close/reopen.
+    // _mmStorageSet handles QuotaExceededError by evicting older mmPOI* entries
+    // before retrying, so the cache is not silently lost when storage is full.
+    _mmStorageSet(
+      `mmPOIAll:${cat.key}`,
+      JSON.stringify(Object.values(this._poiAllElements[cat.key]))
+    );
 
     // ── Build markers from ALL accumulated elements ─────────────────
     const sizeMap = { small: 20, medium: 28, large: 36 };
@@ -1856,12 +1905,13 @@ class MeerkatMapCard extends HTMLElement {
     if (this._poiLayers[cat.key]) this._map.removeLayer(this._poiLayers[cat.key]);
     this._poiLayers[cat.key] = newLayer;
 
-    // Legacy reconnect cache — keep in sync for WiFi→4G fast restore
+    // Keep the legacy in-memory mirrors in sync so disconnectedCallback's
+    // localStorage writes stay consistent, but do NOT write the bulky
+    // mmPOIElements key to disk — mmPOIAll: is the authoritative store and
+    // writing a second copy doubles quota usage unnecessarily.
     if (!this._poiElements) this._poiElements = {};
     this._poiElements[cat.key] = allElements;
     if (this._lastFetchBounds) this._poiElementsBounds = this._lastFetchBounds;
-    try { localStorage.setItem('mmPOIElements', JSON.stringify(this._poiElements)); } catch (_) {}
-    try { localStorage.setItem('mmPOIElementsBounds', JSON.stringify(this._poiElementsBounds)); } catch (_) {}
   }
 
   // ── POI popup ─────────────────────────────────────────────────────
