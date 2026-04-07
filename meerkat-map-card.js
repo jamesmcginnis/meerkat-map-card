@@ -1526,10 +1526,25 @@ class MeerkatMapCard extends HTMLElement {
     this._ringTotal = 0;
     this._ringDone  = 0;
 
-    // Batch into groups of 5 — one Overpass request per batch.
+    // Fire batches sequentially with a staggered delay rather than all at once.
+    // Firing all batches concurrently (old behaviour) could mean 10+ simultaneous
+    // Overpass requests on a cold start with many categories enabled, which
+    // reliably triggers the per-IP rate limit on every mirror.
+    // Staggering by 1.2 s per batch keeps the request cadence well within the
+    // Overpass fair-use policy while still loading all categories quickly.
     const BATCH = 5;
+    const BATCH_DELAY_MS = 1200;
     for (let i = 0; i < needsFetch.length; i += BATCH) {
-      this._loadPOIBatch(needsFetch.slice(i, i + BATCH), s, w, n, e, signal, gen);
+      const batchSlice = needsFetch.slice(i, i + BATCH);
+      const delay = (i / BATCH) * BATCH_DELAY_MS;
+      if (delay === 0) {
+        this._loadPOIBatch(batchSlice, s, w, n, e, signal, gen);
+      } else {
+        setTimeout(() => {
+          if (signal.aborted || gen !== this._loadGen) return;
+          this._loadPOIBatch(batchSlice, s, w, n, e, signal, gen);
+        }, delay);
+      }
     }
   }
 
@@ -1722,14 +1737,10 @@ class MeerkatMapCard extends HTMLElement {
     this._fetchOverpass(encodedQ, signal).then(finish).catch(err => {
       if (signal?.aborted) { fail(); return; }
 
-      // Inspect all individual errors from AggregateError (Promise.any rejection)
-      // or the single error from a direct throw.
-      const errs = err?.errors || [err];
-      const codes = errs.map(e => e?.code).filter(Boolean);
+      const code = err?.code;
 
-      // If every category in this batch already has data in the accumulator,
-      // render from cache and clear the in-flight flags silently — no need to
-      // surface any error or retry the network at all.
+      // If every category in this batch already has cached data, render
+      // from cache silently — no need to surface any error to the user.
       const _renderFromCache = () => {
         toFetch.forEach(cat => {
           this._renderPOILayer(cat, []);
@@ -1742,19 +1753,18 @@ class MeerkatMapCard extends HTMLElement {
         Object.keys(this._poiAllElements[cat.key]).length > 0
       );
 
-      if (codes.includes('rate_limit')) {
+      if (code === 'rate_limit') {
         if (_allCached()) { _renderFromCache(); return; }
-        const retryAfter = errs.find(e => e?.retryAfter)?.retryAfter || 60;
-        this._showAPIInfoSheet('rate_limit', retryAfter);
+        this._showAPIInfoSheet('rate_limit', err.retryAfter || 60);
         fail(); return;
       }
-      if (codes.includes('busy') || codes.every(c => c === 'timeout')) {
+      if (code === 'busy' || code === 'timeout') {
         if (_allCached()) { _renderFromCache(); return; }
         this._showAPIInfoSheet('busy');
         fail(); return;
       }
 
-      // Unknown error — auto-retry once after 3 seconds (catches transient failures)
+      // Unknown/network error — auto-retry once after 3 s (catches transient failures)
       setTimeout(() => {
         if (signal?.aborted || gen !== this._loadGen) { fail(); return; }
         if (_allCached()) { _renderFromCache(); return; }
@@ -1762,11 +1772,10 @@ class MeerkatMapCard extends HTMLElement {
         this._fetchOverpass(encodedQ, signal).then(finish).catch(retryErr => {
           if (signal?.aborted) { fail(); return; }
           if (_allCached()) { _renderFromCache(); return; }
-          const retryCodes = (retryErr?.errors || [retryErr]).map(e => e?.code).filter(Boolean);
-          if (retryCodes.includes('rate_limit')) {
-            const retryAfter = (retryErr?.errors || [retryErr]).find(e => e?.retryAfter)?.retryAfter || 60;
-            this._showAPIInfoSheet('rate_limit', retryAfter);
-          } else if (retryCodes.includes('busy') || retryCodes.every(c => c === 'timeout')) {
+          const retryCode = retryErr?.code;
+          if (retryCode === 'rate_limit') {
+            this._showAPIInfoSheet('rate_limit', retryErr.retryAfter || 60);
+          } else if (retryCode === 'busy' || retryCode === 'timeout') {
             this._showAPIInfoSheet('busy');
           }
           fail();
@@ -1807,52 +1816,78 @@ class MeerkatMapCard extends HTMLElement {
       ]);
     };
 
-    // Always try the HA proxy first — routes through HA server so it is
-    // same-origin and never blocked on iOS.
+    // Build proxy-wrapped URLs (routes through HA so same-origin on iOS)
     const proxyUrls = mirrorUrls.map(
       u => `/api/hass_web_proxy/v0/?url=${encodeURIComponent(u)}`
     );
-    try {
-      return await Promise.any(proxyUrls.map(tryFetch));
-    } catch (e) {
-      if (signal && signal.aborted) throw new DOMException('', 'AbortError');
-      // If the proxy is installed but all mirrors returned a meaningful error
-      // (busy, rate-limited, or all timed out), re-throw immediately — the
-      // direct mirrors are the same servers and will give the same response,
-      // so falling through would just double the wait time for no benefit.
-      const errs = e?.errors || [e];
-      const codes = errs.map(ex => ex?.code).filter(Boolean);
-      const allMeaningful = codes.length > 0 && codes.every(
-        c => c === 'busy' || c === 'rate_limit' || c === 'timeout'
-      );
-      if (allMeaningful) {
-        // When all concurrent mirrors rate-limited, the simultaneous burst is
-        // the likely cause. Try each proxy mirror sequentially with a short
-        // gap — the per-IP limit on any one mirror usually clears within a
-        // few seconds. Only surface the error if every sequential attempt
-        // also fails, so the user never sees "Request Limit reached" unless
-        // the situation is truly unrecoverable.
-        if (codes.some(c => c === 'rate_limit')) {
-          for (const url of proxyUrls) {
-            if (signal?.aborted) throw new DOMException('', 'AbortError');
-            await new Promise(r => setTimeout(r, 3000));
-            if (signal?.aborted) throw new DOMException('', 'AbortError');
-            try {
-              return await tryFetch(url);
-            } catch (ex) {
-              // This mirror is still unhappy — try the next one.
-              if (ex?.code !== 'rate_limit' && ex?.code !== 'busy' && ex?.code !== 'timeout') throw ex;
-            }
-          }
+
+    // Try mirrors sequentially rather than racing them all at once.
+    // Racing all three means every request costs 3× the API quota — exactly
+    // what causes the "Request Limit reached" errors with many categories.
+    // Sequential: try the primary mirror first; only fall back if it fails.
+    const lastErrs = [];
+    for (const url of proxyUrls) {
+      if (signal?.aborted) throw new DOMException('', 'AbortError');
+      try {
+        return await tryFetch(url);
+      } catch (ex) {
+        if (signal?.aborted) throw new DOMException('', 'AbortError');
+        lastErrs.push(ex);
+        // Rate-limited on this mirror — wait a moment then try the next one
+        if (ex?.code === 'rate_limit' || ex?.code === 'busy') {
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
         }
-        throw e;
+        // Timeout on this mirror — try the next immediately
+        if (ex?.code === 'timeout') continue;
+        // Network/proxy error (proxy not installed, CORS, etc.) — fall through
+        // to direct connections rather than trying other proxy URLs for the same error
+        break;
       }
-      // Otherwise the proxy is likely not installed or had a network error —
-      // fall back to direct connections (works on desktop; blocked on iOS).
     }
 
-    // Fallback: race mirrors directly (works on desktop, blocked on iOS without proxy)
-    return await Promise.any(mirrorUrls.map(tryFetch));
+    if (signal?.aborted) throw new DOMException('', 'AbortError');
+
+    // Check if proxy errors were all meaningful (rate limit / busy / timeout)
+    // If so, re-throw the aggregate — direct mirrors will give the same response.
+    const codes = lastErrs.map(ex => ex?.code).filter(Boolean);
+    const allMeaningful = codes.length > 0 && codes.every(
+      c => c === 'busy' || c === 'rate_limit' || c === 'timeout'
+    );
+    if (allMeaningful && codes.length === proxyUrls.length) {
+      // Propagate the most actionable error (rate_limit > busy > timeout)
+      const best = lastErrs.find(e => e?.code === 'rate_limit')
+                || lastErrs.find(e => e?.code === 'busy')
+                || lastErrs[lastErrs.length - 1];
+      throw best;
+    }
+
+    // Fallback: try direct connections sequentially (works on desktop;
+    // may be blocked on iOS without the proxy add-on).
+    const directErrs = [];
+    for (const url of mirrorUrls) {
+      if (signal?.aborted) throw new DOMException('', 'AbortError');
+      try {
+        return await tryFetch(url);
+      } catch (ex) {
+        if (signal?.aborted) throw new DOMException('', 'AbortError');
+        directErrs.push(ex);
+        if (ex?.code === 'rate_limit' || ex?.code === 'busy') {
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
+        }
+        if (ex?.code === 'timeout') continue;
+        break;
+      }
+    }
+
+    // All mirrors failed — throw the most actionable error
+    const allErrs = [...lastErrs, ...directErrs];
+    const best = allErrs.find(e => e?.code === 'rate_limit')
+              || allErrs.find(e => e?.code === 'busy')
+              || allErrs[allErrs.length - 1]
+              || new Error('all mirrors failed');
+    throw best;
   }
 
     _renderPOILayer(cat, elements) {
