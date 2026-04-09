@@ -6,6 +6,8 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=meerkat-map-card&category=plugin)
 
+![Preview](preview.png)
+
 -----
 
 ## Features
@@ -14,7 +16,7 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 - **Person popup** — tap the marker to see last updated time, GPS accuracy, battery, full address, and coordinates
 - **Sharing** — track additional people, devices, or any GPS entity alongside yourself; each appears as its own marker with its current address and distance from you
 - **Points of interest** — 53 categories across 8 groups, fetched from OpenStreetMap via Overpass API
-- **Persistent POI caching** — all fetched POIs accumulate across every area you visit; panning and zooming never causes previously loaded markers to disappear, and revisiting any location restores markers instantly from cache with no network request
+- **Persistent POI caching** — all fetched POIs accumulate across every area you visit; panning, zooming, navigating away, or fully closing and reopening the app never causes previously loaded markers to disappear — revisiting any location restores markers instantly from cache with no network request
 - **POI status ring** — indicator beneath the map controls showing loading, success, and error states with a centre button to stop or refresh
 - **POI popup** — tap any POI to see name, category, address, distance from person, opening hours, phone (tap to call — a styled confirmation sheet appears before dialling), website (icon clickable), and any available extra details such as cuisine, wheelchair access, fees, operator, brand, and network
 - **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
@@ -75,7 +77,7 @@ The card races all three Overpass mirrors simultaneously through the proxy and u
 
 No restart needed after step 2.
 
-> **Why three mirrors?** Each is an independent Overpass server in a different location. Racing them simultaneously means the card always uses whichever is fastest at that moment.
+> **Why three mirrors?** Each is an independent Overpass server in a different location. The card tries them sequentially — primary first, falling back to the others only if it fails — to avoid unnecessary quota usage.
 
 -----
 
@@ -145,7 +147,7 @@ In the editor, the Sharing list shows all entities with GPS coordinates, with a 
 
 > ⚠️ **Performance note:** Enable only a small number of POI categories at once, especially on mobile. Each batch of up to 5 categories uses one network request — enabling more increases load time.
 
-POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) and stored in a persistent local cache. The cache is cumulative — every POI fetched across every area you visit is accumulated and never discarded when you pan or zoom. Returning to any previously visited location restores all markers instantly from cache with no network request and no loading indicator. The cache duration is configurable in the visual editor (default 48 hours — recommended).
+POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) and stored in a persistent local cache. The cache is cumulative — every POI fetched across every area you visit is accumulated and never discarded when you pan, zoom, navigate away, or fully close and reopen the app. Returning to any previously visited location restores all markers instantly from cache with no network request and no loading indicator. The cache duration is configurable in the visual editor (default 48 hours — recommended).
 
 The card includes several optimisations to minimise load time and network usage:
 
@@ -157,7 +159,7 @@ The card includes several optimisations to minimise load time and network usage:
 - Zooming in never triggers a refetch — the data is already loaded
 - A 2.5-second pause after panning avoids wasted fetches mid-drag
 - Panning to a new area cancels any in-flight requests for the old location
-- Navigating away and returning restores all markers instantly from cache
+- Navigating away and returning, or fully closing and reopening the app, restores all markers instantly from cache with no network request
 
 The 53 categories are organised into 8 groups in the visual editor:
 
@@ -193,7 +195,7 @@ The centre button changes depending on state — a stop icon while loading, a re
 
 The visual editor includes a **Cache Settings** section with two options:
 
-**Cache Duration** — controls how long POI data is kept before the card considers it stale. Options range from 6 hours to 3 months. The default of 48 hours is recommended: POIs like bus stops, hospitals, and shops change very rarely, so there is no benefit to fetching them more frequently.
+**Cache Duration** — controls how long POI data is kept before the card considers it stale. Options range from 6 hours to 12 months. The default of 48 hours is recommended: POIs like bus stops, hospitals, and shops change very rarely, so there is no benefit to fetching them more frequently.
 
 **Clear All Cached POI Data** — removes all saved POI data from the device immediately. The current cache size is shown directly below the button (e.g. *184.3 KB across 12 stored regions*) so you can see exactly how much is stored before clearing.
 
@@ -233,7 +235,7 @@ Without this option the card falls back to [Nominatim](https://nominatim.openstr
 - Map tiles are loaded from [CARTO](https://carto.com/) (OpenStreetMap data)
 - POI data is fetched from the [Overpass API](https://overpass-api.de/) and two public mirrors — only the visible map bounding box is sent, no personal data
 - Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
-- POI results are cached in your browser's `localStorage` only — nothing is sent to any third party beyond the API calls above
+- POI results are cached in your browser's `localStorage` and `sessionStorage` only — nothing is sent to any third party beyond the API calls above
 - No analytics, no accounts, no tracking
 
 -----
