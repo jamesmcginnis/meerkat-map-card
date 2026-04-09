@@ -1,5 +1,7 @@
 # Meerkat Map Card
 
+![Preview](preview.png)
+
 Track a person entity on a live OpenStreetMap with an animated pulsing marker, points of interest, distance calculations, full address lookup, and shared location tracking — all from a single Lovelace card.
 
 ## Person tracking
@@ -22,7 +24,7 @@ Tap the map pin button in the top-right controls to open a bottom sheet where yo
 
 ## Points of interest
 
-53 POI categories across 8 groups, toggled individually in the visual editor. Data is fetched from OpenStreetMap via Overpass API and cached locally. All POIs fetched across every area you visit are accumulated and kept — panning or zooming never causes previously loaded markers to disappear. Returning to any visited location restores all markers instantly from cache with no network request.
+53 POI categories across 8 groups, toggled individually in the visual editor. Data is fetched from OpenStreetMap via Overpass API and cached locally. All POIs fetched across every area you visit are accumulated and kept — panning or zooming never causes previously loaded markers to disappear. Returning to any visited location — including reopening the app or navigating away and back — restores all markers instantly from cache with no network request.
 
 > **Note:** Enable only a small number of categories at once, especially on mobile. A small selection of the most useful categories works best.
 
@@ -50,7 +52,7 @@ See the [README](README.md) for full setup steps.
 
 The visual editor includes a Cache Settings section where you can:
 
-- Set the **cache duration** — how long POI data is kept before being considered stale. The default of 48 hours is recommended, as POIs like bus stops and hospitals change very rarely.
+- Set the **cache duration** — how long POI data is kept before being considered stale. Options range from 6 hours to 12 months. The default of 48 hours is recommended, as POIs like bus stops and hospitals change very rarely.
 - **Clear all cached data** — removes all saved POI data from the device immediately. The current cache size is shown directly below the button so you can see how much is stored before clearing.
 
 ## Visual editor
