@@ -383,8 +383,13 @@ class MeerkatMapCard extends HTMLElement {
                 : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
               if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
             }
+            console.log(`[MeerkatCache] Loaded ${Object.keys(this._poiAllElements[cat.key]).length} elements for ${cat.key} from localStorage`);
+          } else {
+            console.log(`[MeerkatCache] No localStorage data for ${cat.key}`);
           }
         } catch (_) {}
+      } else {
+        console.log(`[MeerkatCache] ${cat.key} already in memory (${Object.keys(this._poiAllElements[cat.key]).length} elements), skipping localStorage`);
       }
       // Fetched-region index — skip if already in memory
       if (!this._fetchedRegions[cat.key]) {
@@ -1553,10 +1558,12 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._mapInitialised || !this._map) return;
     if (!this._poiAllElements) this._poiAllElements = {};
     const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+    console.log(`[MeerkatCache] _restorePOIsFromCache: ${enabled.length} enabled categories`);
     for (const cat of enabled) {
-      if (this._poiLayers[cat.key]) continue; // already rendered
-      if (this._poiAllElements[cat.key] &&
-          Object.keys(this._poiAllElements[cat.key]).length > 0) {
+      if (this._poiLayers[cat.key]) { console.log(`[MeerkatCache] ${cat.key}: layer already exists, skipping`); continue; }
+      const count = this._poiAllElements[cat.key] ? Object.keys(this._poiAllElements[cat.key]).length : 0;
+      console.log(`[MeerkatCache] ${cat.key}: ${count} elements in memory`);
+      if (count > 0) {
         this._renderPOILayer(cat, []);
       }
     }
