@@ -683,6 +683,10 @@ class MeerkatMapCard extends HTMLElement {
         // Update the zoom-out notice and layer visibility on every move/zoom
         this._updateZoomNotice();
 
+        // Ignore the moveend that fires from the initial setView call so that
+        // opening or returning to the page never triggers a network fetch.
+        if (this._suppressMoveend) return;
+
         clearTimeout(this._poiDebounce);
 
         // Don't fetch if zoomed out too far — the area would be enormous
@@ -724,7 +728,12 @@ class MeerkatMapCard extends HTMLElement {
       // it is fully visible. Without this tiles only load in a small region.
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
+        // Suppress the moveend handler during the initial setView so that
+        // centring the map on the person does not schedule a network fetch.
+        // The handler is re-enabled once cached POIs have been rendered.
+        this._suppressMoveend = true;
         this._updateMap();
+        this._suppressMoveend = false;
         this._updateZoomNotice();
 
         // Render all cached POI layers immediately from the in-memory accumulator.
@@ -736,7 +745,7 @@ class MeerkatMapCard extends HTMLElement {
         }
 
         // No automatic fetch on startup — cached POIs are rendered above.
-        // The moveend handler will fetch if the user pans to an uncached area.
+        // The moveend handler will fetch only when the user pans to an uncached area.
       });
 
     } catch (e) {
