@@ -359,6 +359,9 @@ class MeerkatMapCard extends HTMLElement {
     if (this._mapInitialised) {
       this._applyTheme();
       this._updateMap();
+      // Restore any cached layers that weren't rendered yet because setConfig
+      // arrived after the initial _restorePOIsFromCache call.
+      if (!this._isTooZoomedOut()) this._restorePOIsFromCache();
       // Clear in-flight guard for any category that was just toggled on
       // so the fetch fires immediately rather than being blocked
       for (const cat of MM_POIS) {
@@ -1587,8 +1590,12 @@ class MeerkatMapCard extends HTMLElement {
   _restorePOIsFromCache() {
     if (!this._mapInitialised || !this._map) return;
     if (!this._poiAllElements) this._poiAllElements = {};
-    const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-    for (const cat of enabled) {
+    // Restore ALL categories that have cached data, regardless of whether
+    // _config has been set yet. On reconnect, set hass can fire before
+    // setConfig, so _config[c.key] may still be the stub default (false).
+    // _loadAllPOIs / setConfig will remove layers for disabled categories
+    // immediately once the real config arrives.
+    for (const cat of MM_POIS) {
       if (this._poiLayers[cat.key]) continue; // already rendered
       if (this._poiAllElements[cat.key] &&
           Object.keys(this._poiAllElements[cat.key]).length > 0) {
