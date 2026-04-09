@@ -52,10 +52,10 @@ function _mmStorageSet(key, value) {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k) continue;
-      if (k.startsWith('mmPOIFetched:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOI:')) {
+      if (k.startsWith('mmPOIFetched:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOI:') || k.startsWith('mmGeo:')) {
         // Prefer evicting fetched-region indexes (cheapest to regenerate) first,
-        // then per-key data blobs. Within each tier, evict the largest entry.
-        const tier = k.startsWith('mmPOIFetched:') ? 0 : k.startsWith('mmPOIAll:') ? 1 : 2;
+        // then per-key data blobs, then geocode entries. Within each tier, evict the largest entry.
+        const tier = k.startsWith('mmPOIFetched:') ? 0 : k.startsWith('mmPOIAll:') ? 1 : k.startsWith('mmGeo:') ? 2 : 3;
         const size = (localStorage.getItem(k) || '').length;
         evictable.push({ k, tier, size });
       }
@@ -668,6 +668,7 @@ class MeerkatMapCard extends HTMLElement {
         this._lastFetchBounds = null;
         this._fetchedRegions  = {};
         this._poiFetching     = {};
+        this._geocodeCache    = {};
         for (const cat of MM_POIS) {
           if (this._poiLayers[cat.key]) {
             this._map.removeLayer(this._poiLayers[cat.key]);
@@ -1192,7 +1193,17 @@ class MeerkatMapCard extends HTMLElement {
       }
     }
     const key = `v10:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    // 1. Check in-memory cache first (fastest)
     if (this._geocodeCache[key]) return this._geocodeCache[key];
+    // 2. Check localStorage — avoids a network round-trip on page reload
+    try {
+      const stored = localStorage.getItem(`mmGeo:${key}`);
+      if (stored) {
+        this._geocodeCache[key] = stored;
+        return stored;
+      }
+    } catch (_) {}
+    // 3. No cached data at this map reference — fetch from Nominatim
     try {
       const _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
       const r  = await fetch(`${_p}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
@@ -1208,6 +1219,8 @@ class MeerkatMapCard extends HTMLElement {
         a.town||a.city||a.village||a.county||null, a.postcode||null].filter(Boolean);
       const result = parts.join(', ') || d.display_name || 'Unknown location';
       this._geocodeCache[key] = result;
+      // Persist to localStorage so subsequent page loads skip the API call
+      _mmStorageSet(`mmGeo:${key}`, result);
       return result;
     } catch { return 'Location unavailable'; }
   }
@@ -2866,7 +2879,7 @@ class MeerkatMapCardEditor extends HTMLElement {
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
           if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') ||
-              k.startsWith('mmPOIFetched:') ||
+              k.startsWith('mmPOIFetched:') || k.startsWith('mmGeo:') ||
               k === 'mmPOIElements' || k === 'mmPOIElementsBounds')) {
             const v = localStorage.getItem(k) || '';
             bytes += (k.length + v.length) * 2;
@@ -2891,7 +2904,7 @@ class MeerkatMapCardEditor extends HTMLElement {
           const keys = [];
           for (let i = 0; i < localStorage.length; i++) {
             const k = localStorage.key(i);
-            if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOIFetched:'))) keys.push(k);
+            if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOIFetched:') || k.startsWith('mmGeo:'))) keys.push(k);
           }
           keys.forEach(k => localStorage.removeItem(k));
           localStorage.removeItem('mmPOIElements');
