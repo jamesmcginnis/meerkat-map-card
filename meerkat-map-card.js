@@ -408,7 +408,7 @@ class MeerkatMapCard extends HTMLElement {
   connectedCallback()    { /* map init happens in set hass */ }
   disconnectedCallback() {
     clearTimeout(this._poiDebounce);
-    if (this._initFetchTimer) { clearTimeout(this._initFetchTimer); this._initFetchTimer = null; }
+
     this._closeAllOverlays();
     if (this._map) {
       // Save current position, fetch bounds, and in-memory POI elements so we
@@ -683,8 +683,6 @@ class MeerkatMapCard extends HTMLElement {
         // Update the zoom-out notice and layer visibility on every move/zoom
         this._updateZoomNotice();
 
-        // Cancel the post-init 3 s fetch timer — the moveend handler takes over.
-        if (this._initFetchTimer) { clearTimeout(this._initFetchTimer); this._initFetchTimer = null; }
         clearTimeout(this._poiDebounce);
 
         // Don't fetch if zoomed out too far — the area would be enormous
@@ -737,22 +735,8 @@ class MeerkatMapCard extends HTMLElement {
           this._restorePOIsFromCache();
         }
 
-        // Only trigger a network prefetch if at least one enabled category is not
-        // already cached for the current viewport (spatial + TTL check).
-        // Uses the same authoritative _isAreaFetched test as the moveend handler,
-        // so the ring never spins on reload when valid cached data covers the view.
-        if (!this._isTooZoomedOut()) {
-          const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-          if (enabled.length > 0) {
-            const b   = this._map.getBounds();
-            const bs  = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
-            const anyMissing = enabled.some(cat => !this._isAreaFetched(cat, bs, bw, bn, be));
-            if (anyMissing) {
-              // Wait 3 s before the first network fetch. Cancel if moveend fires first.
-              this._initFetchTimer = setTimeout(() => { this._initFetchTimer = null; this._prefetchPOIs(); }, 3000);
-            }
-          }
-        }
+        // No automatic fetch on startup — cached POIs are rendered above.
+        // The moveend handler will fetch if the user pans to an uncached area.
       });
 
     } catch (e) {
