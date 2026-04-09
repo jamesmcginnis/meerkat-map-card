@@ -737,25 +737,21 @@ class MeerkatMapCard extends HTMLElement {
           this._restorePOIsFromCache();
         }
 
-        // Only trigger a network prefetch if at least one enabled category has
-        // no accumulated data, OR its fetched-region records are all expired.
-        // Categories with valid cached data render from the accumulator immediately
-        // and are never refetched automatically — use the ring button to force a refresh.
-        const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-        const now = Date.now();
-        const ttl = this._cacheTTL;
-        const anyMissing = enabled.some(cat => {
-          // No data at all → definitely need a fetch
-          if (!this._poiAllElements?.[cat.key] ||
-              Object.keys(this._poiAllElements[cat.key]).length === 0) return true;
-          // Data exists but all fetched-region records are expired → stale, refetch
-          const regions = this._fetchedRegions?.[cat.key];
-          if (!regions || regions.length === 0) return false; // unknown age, keep cached data
-          return regions.every(r => now - r.ts >= ttl);
-        });
-        if (anyMissing && !this._isTooZoomedOut()) {
-          // Wait 3 s before the first network fetch. Cancel if moveend fires first.
-          this._initFetchTimer = setTimeout(() => { this._initFetchTimer = null; this._prefetchPOIs(); }, 3000);
+        // Only trigger a network prefetch if at least one enabled category is not
+        // already cached for the current viewport (spatial + TTL check).
+        // Uses the same authoritative _isAreaFetched test as the moveend handler,
+        // so the ring never spins on reload when valid cached data covers the view.
+        if (!this._isTooZoomedOut()) {
+          const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
+          if (enabled.length > 0) {
+            const b   = this._map.getBounds();
+            const bs  = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
+            const anyMissing = enabled.some(cat => !this._isAreaFetched(cat, bs, bw, bn, be));
+            if (anyMissing) {
+              // Wait 3 s before the first network fetch. Cancel if moveend fires first.
+              this._initFetchTimer = setTimeout(() => { this._initFetchTimer = null; this._prefetchPOIs(); }, 3000);
+            }
+          }
         }
       });
 
