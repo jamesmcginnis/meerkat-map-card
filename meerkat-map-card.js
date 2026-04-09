@@ -383,13 +383,8 @@ class MeerkatMapCard extends HTMLElement {
                 : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
               if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
             }
-            console.log(`[MeerkatCache] Loaded ${Object.keys(this._poiAllElements[cat.key]).length} elements for ${cat.key} from localStorage`);
-          } else {
-            console.log(`[MeerkatCache] No localStorage data for ${cat.key}`);
           }
         } catch (_) {}
-      } else {
-        console.log(`[MeerkatCache] ${cat.key} already in memory (${Object.keys(this._poiAllElements[cat.key]).length} elements), skipping localStorage`);
       }
       // Fetched-region index — skip if already in memory
       if (!this._fetchedRegions[cat.key]) {
@@ -688,9 +683,9 @@ class MeerkatMapCard extends HTMLElement {
         // Update the zoom-out notice and layer visibility on every move/zoom
         this._updateZoomNotice();
 
-        // Ignore the moveend that fires from the initial setView call so that
-        // opening or returning to the page never triggers a network fetch.
-        if (this._suppressMoveend) return;
+        // Ignore moveend events that fire during the initial setView call so
+        // that opening or returning to the page never triggers a network fetch.
+        if (this._suppressMoveend > 0) return;
 
         clearTimeout(this._poiDebounce);
 
@@ -735,10 +730,12 @@ class MeerkatMapCard extends HTMLElement {
         this._map.invalidateSize({ animate: false });
         // Suppress the moveend handler during the initial setView so that
         // centring the map on the person does not schedule a network fetch.
-        // The handler is re-enabled once cached POIs have been rendered.
-        this._suppressMoveend = true;
+        // Use a counter (not boolean) so any async moveend firing after the
+        // flag clears is also caught — the counter stays > 0 until the next
+        // animation frame, by which time _restorePOIsFromCache has already run.
+        this._suppressMoveend = (this._suppressMoveend || 0) + 1;
         this._updateMap();
-        this._suppressMoveend = false;
+        requestAnimationFrame(() => { this._suppressMoveend = Math.max(0, (this._suppressMoveend || 1) - 1); });
         this._updateZoomNotice();
 
         // Render all cached POI layers immediately from the in-memory accumulator.
@@ -1558,12 +1555,10 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._mapInitialised || !this._map) return;
     if (!this._poiAllElements) this._poiAllElements = {};
     const enabled = MM_POIS.filter(c => this._config && this._config[c.key]);
-    console.log(`[MeerkatCache] _restorePOIsFromCache: ${enabled.length} enabled categories`);
     for (const cat of enabled) {
-      if (this._poiLayers[cat.key]) { console.log(`[MeerkatCache] ${cat.key}: layer already exists, skipping`); continue; }
-      const count = this._poiAllElements[cat.key] ? Object.keys(this._poiAllElements[cat.key]).length : 0;
-      console.log(`[MeerkatCache] ${cat.key}: ${count} elements in memory`);
-      if (count > 0) {
+      if (this._poiLayers[cat.key]) continue; // already rendered
+      if (this._poiAllElements[cat.key] &&
+          Object.keys(this._poiAllElements[cat.key]).length > 0) {
         this._renderPOILayer(cat, []);
       }
     }
