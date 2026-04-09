@@ -27,50 +27,63 @@ async function _mmFetchCSS(url) {
   return text;
 }
 
-// ── Safe localStorage helper with quota-aware LRU eviction ─────────
-// localStorage on mobile (especially iOS Safari in private browsing, or when
-// the browser storage quota is full) throws QuotaExceededError on setItem.
-// Rather than silently swallowing those errors (which leaves the in-memory
-// cache warm but the on-disk cache empty, so the next cold load fetches
-// everything again), we:
-//   1. Try a normal setItem.
-//   2. On quota failure, evict the oldest mmPOI* entries until there is room,
-//      then retry once.
-//   3. If still failing, return false so the caller knows the write failed.
+// ── Safe storage helpers ────────────────────────────────────────────
+// On iOS WKWebView (Home Assistant app), localStorage can be unreliable:
+// it may be sandboxed per-session, cleared under memory pressure, or quota
+// exhausted. Strategy:
+//   1. Always write to sessionStorage first (reliable in-session, survives
+//      WiFi↔Mobile switches which only reconnect the web socket).
+//   2. Also write to localStorage (survives full app close/reopen on most
+//      platforms). On quota failure, evict oldest mmPOI* entries and retry.
+//   3. Reads check localStorage first, then sessionStorage as fallback.
+
 function _mmStorageSet(key, value) {
+  // Always keep sessionStorage warm — it survives network switches reliably
+  try { sessionStorage.setItem(key, value); } catch (_) {}
+
+  // Attempt localStorage write
   try {
     localStorage.setItem(key, value);
     return true;
   } catch (e) {
-    // Not a quota error — nothing we can do.
     if (!e || (e.name !== 'QuotaExceededError' && e.name !== 'NS_ERROR_DOM_QUOTA_REACHED')) return false;
   }
-  // Evict oldest mmPOI* entries (by oldest mmPOIFetched timestamp, then mmPOIAll, then mmPOI)
+  // Quota exceeded — evict oldest mmPOI* / mmGeo: entries and retry
   try {
-    // Collect evictable keys with a rough age signal
     const evictable = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k) continue;
       if (k.startsWith('mmPOIFetched:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOI:') || k.startsWith('mmGeo:')) {
-        // Prefer evicting fetched-region indexes (cheapest to regenerate) first,
-        // then per-key data blobs, then geocode entries. Within each tier, evict the largest entry.
+        // Eviction priority: region indexes first (cheapest to regenerate),
+        // then element blobs, then geocode strings. Within tier, largest first.
         const tier = k.startsWith('mmPOIFetched:') ? 0 : k.startsWith('mmPOIAll:') ? 1 : k.startsWith('mmGeo:') ? 2 : 3;
         const size = (localStorage.getItem(k) || '').length;
         evictable.push({ k, tier, size });
       }
     }
-    // Sort: lowest tier (most expendable) first, then largest size first
     evictable.sort((a, b) => a.tier - b.tier || b.size - a.size);
     for (const { k } of evictable) {
       localStorage.removeItem(k);
-      try {
-        localStorage.setItem(key, value);
-        return true; // freed enough space
-      } catch (_) {} // keep evicting
+      try { localStorage.setItem(key, value); return true; } catch (_) {}
     }
   } catch (_) {}
   return false;
+}
+
+function _mmStorageGet(key) {
+  // Try localStorage first (persistent across app restarts), fall back to
+  // sessionStorage (reliable within a session, survives network switches).
+  try {
+    const v = localStorage.getItem(key);
+    if (v !== null) return v;
+  } catch (_) {}
+  try { return sessionStorage.getItem(key); } catch (_) { return null; }
+}
+
+function _mmStorageRemove(key) {
+  try { localStorage.removeItem(key); } catch (_) {}
+  try { sessionStorage.removeItem(key); } catch (_) {}
 }
 
 // ── Tag matcher: assigns batch-fetched elements back to categories ──
@@ -373,7 +386,7 @@ class MeerkatMapCard extends HTMLElement {
       if (!this._poiAllElements[cat.key] ||
           Object.keys(this._poiAllElements[cat.key]).length === 0) {
         try {
-          const raw = localStorage.getItem(`mmPOIAll:${cat.key}`);
+          const raw = _mmStorageGet(`mmPOIAll:${cat.key}`);
           if (raw) {
             const arr = JSON.parse(raw);
             this._poiAllElements[cat.key] = {};
@@ -389,7 +402,7 @@ class MeerkatMapCard extends HTMLElement {
       // Fetched-region index — skip if already in memory
       if (!this._fetchedRegions[cat.key]) {
         try {
-          const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
+          const raw = _mmStorageGet(`mmPOIFetched:${cat.key}`);
           if (raw) this._fetchedRegions[cat.key] = JSON.parse(raw);
         } catch (_) {}
       }
@@ -442,6 +455,11 @@ class MeerkatMapCard extends HTMLElement {
     if (this._cacheClearedHandler) {
       window.removeEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
       this._cacheClearedHandler = null;
+    }
+    if (this._flushCacheHandler) {
+      window.removeEventListener('pagehide',        this._flushCacheHandler, { capture: true });
+      window.removeEventListener('visibilitychange', this._flushCacheHandler, { capture: true });
+      this._flushCacheHandler = null;
     }
     this._loadGen = 0; this._ringGen = 0;
     this._mapCentredOnce = false;
@@ -677,6 +695,21 @@ class MeerkatMapCard extends HTMLElement {
         }
       };
       window.addEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
+
+      // On iOS, the app can be killed without disconnectedCallback firing.
+      // pagehide / visibilitychange give us a last chance to flush the in-memory
+      // accumulator to storage so the next cold launch finds the data.
+      this._flushCacheHandler = () => {
+        if (!this._poiAllElements) return;
+        for (const cat of MM_POIS) {
+          const els = this._poiAllElements[cat.key];
+          if (els && Object.keys(els).length > 0) {
+            _mmStorageSet(`mmPOIAll:${cat.key}`, JSON.stringify(Object.values(els)));
+          }
+        }
+      };
+      window.addEventListener('pagehide',          this._flushCacheHandler, { capture: true });
+      window.addEventListener('visibilitychange',   this._flushCacheHandler, { capture: true });
 
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
@@ -1188,7 +1221,7 @@ class MeerkatMapCard extends HTMLElement {
     if (this._geocodeCache[key]) return this._geocodeCache[key];
     // 2. Check localStorage — avoids a network round-trip on page reload
     try {
-      const stored = localStorage.getItem(`mmGeo:${key}`);
+      const stored = _mmStorageGet(`mmGeo:${key}`);
       if (stored) {
         this._geocodeCache[key] = stored;
         return stored;
@@ -1598,7 +1631,7 @@ class MeerkatMapCard extends HTMLElement {
 
     // Fallback: check localStorage and warm the in-memory cache on hit
     try {
-      const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
+      const raw = _mmStorageGet(`mmPOIFetched:${cat.key}`);
       if (!raw) return false;
       const stored = JSON.parse(raw);
       if (coversView(stored)) {
@@ -1616,7 +1649,7 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._fetchedRegions[cat.key])  this._fetchedRegions[cat.key] = [];
     this._fetchedRegions[cat.key].push(entry);
     try {
-      const raw = localStorage.getItem(`mmPOIFetched:${cat.key}`);
+      const raw = _mmStorageGet(`mmPOIFetched:${cat.key}`);
       let arr = raw ? JSON.parse(raw) : [];
       arr.push(entry);
       // Prune expired entries first (they are worthless disk space)
@@ -2368,11 +2401,11 @@ class MeerkatMapCard extends HTMLElement {
       const keys = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOIFetched:'))) keys.push(k);
+        if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOIFetched:') || k.startsWith('mmGeo:'))) keys.push(k);
       }
-      keys.forEach(k => localStorage.removeItem(k));
-      localStorage.removeItem('mmPOIElements');
-      localStorage.removeItem('mmPOIElementsBounds');
+      keys.forEach(k => _mmStorageRemove(k));
+      _mmStorageRemove('mmPOIElements');
+      _mmStorageRemove('mmPOIElementsBounds');
     } catch (_) {}
 
     this._loadAllPOIs();
@@ -2872,7 +2905,7 @@ class MeerkatMapCardEditor extends HTMLElement {
           if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') ||
               k.startsWith('mmPOIFetched:') || k.startsWith('mmGeo:') ||
               k === 'mmPOIElements' || k === 'mmPOIElementsBounds')) {
-            const v = localStorage.getItem(k) || '';
+            const v = (_mmStorageGet(k)) || '';
             bytes += (k.length + v.length) * 2;
             entries++;
           }
@@ -2897,9 +2930,9 @@ class MeerkatMapCardEditor extends HTMLElement {
             const k = localStorage.key(i);
             if (k && (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') || k.startsWith('mmPOIFetched:') || k.startsWith('mmGeo:'))) keys.push(k);
           }
-          keys.forEach(k => localStorage.removeItem(k));
-          localStorage.removeItem('mmPOIElements');
-          localStorage.removeItem('mmPOIElementsBounds');
+          keys.forEach(k => _mmStorageRemove(k));
+          _mmStorageRemove('mmPOIElements');
+          _mmStorageRemove('mmPOIElementsBounds');
           // Notify any live card instances on this page so they wipe their
           // in-memory state and remove POI layers immediately.
           window.dispatchEvent(new CustomEvent('meerkat-cache-cleared'));
