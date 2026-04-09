@@ -2662,6 +2662,8 @@ class MeerkatMapCardEditor extends HTMLElement {
                 <option value="720"  ${(cfg.cache_ttl_hours||48)===720  ?'selected':''}>1 month</option>
                 <option value="1440" ${(cfg.cache_ttl_hours||48)===1440 ?'selected':''}>2 months</option>
                 <option value="2160" ${(cfg.cache_ttl_hours||48)===2160 ?'selected':''}>3 months</option>
+                <option value="4380" ${(cfg.cache_ttl_hours||48)===4380 ?'selected':''}>6 months</option>
+                <option value="8760" ${(cfg.cache_ttl_hours||48)===8760 ?'selected':''}>12 months</option>
               </select>
             </div>
             <div class="select-row" style="border-top:1px solid var(--divider-color,rgba(0,0,0,0.06));">
