@@ -391,13 +391,28 @@ class MeerkatMapCard extends HTMLElement {
         try {
           const raw = _mmStorageGet(`mmPOIAll:${cat.key}`);
           if (raw) {
-            const arr = JSON.parse(raw);
-            this._poiAllElements[cat.key] = {};
-            for (const el of arr) {
-              const eid = el.id != null
-                ? String(el.id)
-                : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
-              if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
+            const parsed = JSON.parse(raw);
+            // Support both legacy format (plain array) and new timestamped
+            // format ({ _ts: <ms>, elements: [...] }). Reject timestamped
+            // blobs that are older than the configured cache TTL so that
+            // stale element data is never rendered and the user's Cache
+            // Duration setting is actually honoured for element data.
+            let arr;
+            if (Array.isArray(parsed)) {
+              // Legacy: no timestamp — treat as valid (TTL unknown)
+              arr = parsed;
+            } else if (parsed && parsed._ts != null) {
+              const age = Date.now() - parsed._ts;
+              arr = age < this._cacheTTL ? parsed.elements : null;
+            }
+            if (arr) {
+              this._poiAllElements[cat.key] = {};
+              for (const el of arr) {
+                const eid = el.id != null
+                  ? String(el.id)
+                  : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
+                if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
+              }
             }
           }
         } catch (_) {}
@@ -704,10 +719,13 @@ class MeerkatMapCard extends HTMLElement {
       // accumulator to storage so the next cold launch finds the data.
       this._flushCacheHandler = () => {
         if (!this._poiAllElements) return;
+        // Use the same timestamped format as _renderPOILayer so that
+        // _warmCacheFromStorage can enforce the TTL on the next cold load.
+        const ts = Date.now();
         for (const cat of MM_POIS) {
           const els = this._poiAllElements[cat.key];
           if (els && Object.keys(els).length > 0) {
-            _mmStorageSet(`mmPOIAll:${cat.key}`, JSON.stringify(Object.values(els)));
+            _mmStorageSet(`mmPOIAll:${cat.key}`, JSON.stringify({ _ts: ts, elements: Object.values(els) }));
           }
         }
       };
@@ -1912,9 +1930,13 @@ class MeerkatMapCard extends HTMLElement {
     // redundant writes on every cold start — each write risks triggering
     // quota-eviction that could silently discard another category's data.
     if (newCount > 0) {
+      // Wrap with a timestamp so _warmCacheFromStorage can validate the data
+      // against the configured Cache Duration (TTL) on the next cold load.
+      // Without this, element data could survive indefinitely regardless of
+      // what the user has set in the visual editor.
       _mmStorageSet(
         `mmPOIAll:${cat.key}`,
-        JSON.stringify(Object.values(this._poiAllElements[cat.key]))
+        JSON.stringify({ _ts: Date.now(), elements: Object.values(this._poiAllElements[cat.key]) })
       );
     }
 
