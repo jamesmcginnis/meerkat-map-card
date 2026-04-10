@@ -107,6 +107,7 @@ function _mmStorageSet(key, value) {
   if (_mmIDB) {
     try {
       const tx = _mmIDB.transaction(_mmIDB_STORE, 'readwrite');
+      tx.onerror = () => {}; // prevent unhandled-rejection noise on iOS under memory pressure
       tx.objectStore(_mmIDB_STORE).put(value, key);
     } catch (_) {}
   } else {
@@ -115,6 +116,7 @@ function _mmStorageSet(key, value) {
       if (_mmIDB) {
         try {
           const tx = _mmIDB.transaction(_mmIDB_STORE, 'readwrite');
+          tx.onerror = () => {};
           tx.objectStore(_mmIDB_STORE).put(value, key);
         } catch (_) {}
       }
@@ -167,6 +169,7 @@ function _mmStorageRemove(key) {
   if (_mmIDB) {
     try {
       const tx = _mmIDB.transaction(_mmIDB_STORE, 'readwrite');
+      tx.onerror = () => {};
       tx.objectStore(_mmIDB_STORE).delete(key);
     } catch (_) {}
   }
@@ -819,7 +822,13 @@ class MeerkatMapCard extends HTMLElement {
       // timestamps) — without the latter, _isAreaFetched returns false on cold start
       // even when element data exists, causing an unnecessary full re-download that
       // makes the cache appear empty.
-      this._flushCacheHandler = () => {
+      this._flushCacheHandler = (evt) => {
+        // Only flush when the page is actually being hidden/killed.
+        // visibilitychange also fires when the app comes back to the foreground
+        // (visibilityState === 'visible') — we must skip that case or we waste
+        // cycles and risk a misleading write on resume.
+        if (evt && evt.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
+
         // Flush element data
         if (this._poiAllElements) {
           for (const cat of MM_POIS) {
@@ -910,10 +919,11 @@ class MeerkatMapCard extends HTMLElement {
         this._updateZoomNotice();
 
         // Render all cached POI layers from the in-memory accumulator.
-        // _warmCacheFromStorage (async, awaits IDB) has been called from setConfig.
-        // We wait for it here to ensure data persisted across app kills (in IDB)
-        // is visible on this first render, not just data that was in localStorage.
-        _mmStorageInit().then(() => {
+        // We first await _warmCacheFromStorage (which itself awaits IDB init)
+        // so that data persisted to IndexedDB across app kills is in _poiAllElements
+        // before _restorePOIsFromCache iterates it.  Without this chain the
+        // restore runs while _poiAllElements is still empty and renders nothing.
+        _mmStorageInit().then(() => this._warmCacheFromStorage()).then(() => {
           if (!this._mapInitialised || !this._map) return;
           if (!this._isTooZoomedOut()) {
             this._restorePOIsFromCache();
@@ -1774,14 +1784,18 @@ class MeerkatMapCard extends HTMLElement {
     // Fast path: check in-memory regions first
     if (coversView(this._fetchedRegions?.[cat.key])) return true;
 
-    // Fallback: check localStorage and warm the in-memory cache on hit
+    // Fallback: check storage and warm the in-memory cache on hit.
+    // Strip expired entries before promoting to memory — without this a stale
+    // region read from IDB/localStorage bypasses the TTL check entirely and
+    // prevents the card from ever re-fetching that area after expiry.
     try {
       const raw = _mmStorageGet(`mmPOIFetched:${cat.key}`);
       if (!raw) return false;
       const stored = JSON.parse(raw);
-      if (coversView(stored)) {
+      const validStored = stored.filter(r => nowMs - r.ts < ttl);
+      if (coversView(validStored)) {
         if (!this._fetchedRegions) this._fetchedRegions = {};
-        this._fetchedRegions[cat.key] = stored;
+        this._fetchedRegions[cat.key] = validStored;
         return true;
       }
     } catch (_) {}
@@ -2318,7 +2332,10 @@ class MeerkatMapCard extends HTMLElement {
   // The refresh button lives in #mm-controls alongside the other ctrl buttons.
   // States: idle | loading (spinning, yellow) | success (green, auto-reverts) | error (red, auto-reverts)
   // A generation counter ensures stale fetch callbacks don't corrupt the state.
-  get _cacheTTL() { return ((this._config && this._config.cache_ttl_hours) || 48) * 3600000; }
+  get _cacheTTL() {
+    const hours = (this._config && Number(this._config.cache_ttl_hours)) || 48;
+    return (hours > 0 ? hours : 48) * 3600000;
+  }
 
   _btnEl() { return this.shadowRoot && this.shadowRoot.getElementById('mm-ring-btn'); }
   // Keep _ringEl / _arcEl as no-ops so legacy call-sites don't throw
