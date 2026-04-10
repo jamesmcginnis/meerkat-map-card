@@ -391,28 +391,13 @@ class MeerkatMapCard extends HTMLElement {
         try {
           const raw = _mmStorageGet(`mmPOIAll:${cat.key}`);
           if (raw) {
-            const parsed = JSON.parse(raw);
-            // Support both legacy format (plain array) and new timestamped
-            // format ({ _ts: <ms>, elements: [...] }). Reject timestamped
-            // blobs that are older than the configured cache TTL so that
-            // stale element data is never rendered and the user's Cache
-            // Duration setting is actually honoured for element data.
-            let arr;
-            if (Array.isArray(parsed)) {
-              // Legacy: no timestamp — treat as valid (TTL unknown)
-              arr = parsed;
-            } else if (parsed && parsed._ts != null) {
-              const age = Date.now() - parsed._ts;
-              arr = age < this._cacheTTL ? parsed.elements : null;
-            }
-            if (arr) {
-              this._poiAllElements[cat.key] = {};
-              for (const el of arr) {
-                const eid = el.id != null
-                  ? String(el.id)
-                  : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
-                if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
-              }
+            const arr = JSON.parse(raw);
+            this._poiAllElements[cat.key] = {};
+            for (const el of arr) {
+              const eid = el.id != null
+                ? String(el.id)
+                : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
+              if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
             }
           }
         } catch (_) {}
@@ -421,7 +406,14 @@ class MeerkatMapCard extends HTMLElement {
       if (!this._fetchedRegions[cat.key]) {
         try {
           const raw = _mmStorageGet(`mmPOIFetched:${cat.key}`);
-          if (raw) this._fetchedRegions[cat.key] = JSON.parse(raw);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            // Only keep non-expired regions so we don't falsely claim coverage
+            const ttl = this._cacheTTL;
+            const now = Date.now();
+            const valid = arr.filter(r => now - r.ts < ttl);
+            if (valid.length > 0) this._fetchedRegions[cat.key] = valid;
+          }
         } catch (_) {}
       }
     }
@@ -449,8 +441,10 @@ class MeerkatMapCard extends HTMLElement {
         const z = this._map.getZoom();
         const payload = { lat: c.lat, lng: c.lng, zoom: z };
         if (this._lastFetchBounds) payload.bounds = this._lastFetchBounds;
-        // Use localStorage so position survives full app close/reopen
-        localStorage.setItem('mmMapPos', JSON.stringify(payload));
+        // Use _mmStorageSet so position is written to both localStorage
+        // (survives full app close/reopen) and sessionStorage (survives
+        // WiFi↔Mobile network switches within the same session).
+        _mmStorageSet('mmMapPos', JSON.stringify(payload));
       } catch (_) {}
       // mmPOIAll: keys are written incrementally by _renderPOILayer (using
       // _mmStorageSet with eviction), so they are already up-to-date on disk.
@@ -477,6 +471,7 @@ class MeerkatMapCard extends HTMLElement {
     if (this._flushCacheHandler) {
       window.removeEventListener('pagehide',        this._flushCacheHandler, { capture: true });
       window.removeEventListener('visibilitychange', this._flushCacheHandler, { capture: true });
+      window.removeEventListener('beforeunload',     this._flushCacheHandler, { capture: true });
       this._flushCacheHandler = null;
     }
     this._loadGen = 0; this._ringGen = 0;
@@ -715,22 +710,41 @@ class MeerkatMapCard extends HTMLElement {
       window.addEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
 
       // On iOS, the app can be killed without disconnectedCallback firing.
-      // pagehide / visibilitychange give us a last chance to flush the in-memory
-      // accumulator to storage so the next cold launch finds the data.
+      // pagehide / visibilitychange / beforeunload give us a last chance to flush
+      // the in-memory accumulator to storage so the next cold launch finds the data.
+      // IMPORTANT: we flush BOTH mmPOIAll: (element data) AND mmPOIFetched: (region
+      // timestamps) — without the latter, _isAreaFetched returns false on cold start
+      // even when element data exists, causing an unnecessary full re-download that
+      // makes the cache appear empty.
       this._flushCacheHandler = () => {
-        if (!this._poiAllElements) return;
-        // Use the same timestamped format as _renderPOILayer so that
-        // _warmCacheFromStorage can enforce the TTL on the next cold load.
-        const ts = Date.now();
-        for (const cat of MM_POIS) {
-          const els = this._poiAllElements[cat.key];
-          if (els && Object.keys(els).length > 0) {
-            _mmStorageSet(`mmPOIAll:${cat.key}`, JSON.stringify({ _ts: ts, elements: Object.values(els) }));
+        // Flush element data
+        if (this._poiAllElements) {
+          for (const cat of MM_POIS) {
+            const els = this._poiAllElements[cat.key];
+            if (els && Object.keys(els).length > 0) {
+              _mmStorageSet(`mmPOIAll:${cat.key}`, JSON.stringify(Object.values(els)));
+            }
+          }
+        }
+        // Flush region timestamp records — these are the TTL anchors that tell
+        // _isAreaFetched whether cached data is still valid. Without this flush
+        // the card always re-fetches on cold start even though data is present.
+        if (this._fetchedRegions) {
+          const ttl = this._cacheTTL;
+          const now = Date.now();
+          for (const cat of MM_POIS) {
+            const regions = this._fetchedRegions[cat.key];
+            if (!regions || regions.length === 0) continue;
+            const valid = regions.filter(r => now - r.ts < ttl);
+            if (valid.length > 0) {
+              _mmStorageSet(`mmPOIFetched:${cat.key}`, JSON.stringify(valid));
+            }
           }
         }
       };
       window.addEventListener('pagehide',          this._flushCacheHandler, { capture: true });
       window.addEventListener('visibilitychange',   this._flushCacheHandler, { capture: true });
+      window.addEventListener('beforeunload',       this._flushCacheHandler, { capture: true });
 
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
@@ -828,7 +842,7 @@ class MeerkatMapCard extends HTMLElement {
     // visited area won't trigger a redundant network fetch.
     if (!this._mapCentredOnce) {
       try {
-        const saved = localStorage.getItem('mmMapPos');
+        const saved = _mmStorageGet('mmMapPos');
         if (saved) {
           const { bounds } = JSON.parse(saved);
           if (bounds) this._lastFetchBounds = bounds;
@@ -1930,13 +1944,9 @@ class MeerkatMapCard extends HTMLElement {
     // redundant writes on every cold start — each write risks triggering
     // quota-eviction that could silently discard another category's data.
     if (newCount > 0) {
-      // Wrap with a timestamp so _warmCacheFromStorage can validate the data
-      // against the configured Cache Duration (TTL) on the next cold load.
-      // Without this, element data could survive indefinitely regardless of
-      // what the user has set in the visual editor.
       _mmStorageSet(
         `mmPOIAll:${cat.key}`,
-        JSON.stringify({ _ts: Date.now(), elements: Object.values(this._poiAllElements[cat.key]) })
+        JSON.stringify(Object.values(this._poiAllElements[cat.key]))
       );
     }
 
