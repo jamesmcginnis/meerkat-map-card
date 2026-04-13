@@ -476,18 +476,34 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Cache warm-up ─────────────────────────────────────────────────
   // Reads mmPOIAll: (element data) and mmPOIFetched: (region records) from
-  // the storage layer (_mmMem, backed by IndexedDB) into the card's working
-  // memory.  We warm ALL categories, not just enabled ones, so that:
+  // _mmMem into the card's working memory.  We warm ALL categories, not just
+  // enabled ones, so that:
   //   (a) toggling a category on instantly shows cached markers, and
   //   (b) a network switch (WiFi → Mobile) that reconnects the card element
   //       never causes a false "cache empty" state for enabled categories.
-  // Called from setConfig. Awaits IDB init so that data persisted across
-  // app kills (stored in IndexedDB) is available before the map renders.
+  //
+  // Two-pass strategy to avoid a blank-map flash:
+  //   Pass 1 (_doWarmFromMem) — synchronous, called immediately.
+  //     _mmMem is already seeded from localStorage by the module-level
+  //     _mmStorageInit() call, so this populates _poiAllElements before
+  //     Leaflet even finishes loading.  POIs are visible on first render.
+  //   Pass 2 — awaits IDB, then calls _doWarmFromMem again.
+  //     On iOS, localStorage can be cleared by the OS between sessions;
+  //     IDB is the only reliable persistent store there.  The second pass
+  //     merges in any IDB-only keys that weren't in localStorage.
   async _warmCacheFromStorage() {
-    // Wait for IDB to finish populating _mmMem — this is fast (<50 ms typically)
-    // and ensures the cold-start read sees data saved before the app was killed.
-    await _mmStorageInit();
+    // Pass 1: populate from whatever is already in _mmMem (localStorage data).
+    this._doWarmFromMem();
 
+    // Pass 2: wait for IDB to finish loading into _mmMem, then merge again.
+    // This picks up IDB-only data (e.g. after iOS clears localStorage).
+    await _mmStorageInit();
+    this._doWarmFromMem();
+  }
+
+  // Synchronous inner loop — reads from _mmMem into instance caches.
+  // Safe to call multiple times; guards skip keys already in memory.
+  _doWarmFromMem() {
     if (!this._poiAllElements) this._poiAllElements = {};
     if (!this._fetchedRegions)  this._fetchedRegions  = {};
     for (const cat of MM_POIS) {
@@ -565,8 +581,9 @@ class MeerkatMapCard extends HTMLElement {
       this._poiLayers    = {};
       this._poiFetching  = {};
     }
-    this._mapInitialised = false;
-    this._mapIniting     = false;  // must reset or re-init is blocked
+    this._mapInitialised  = false;
+    this._mapIniting      = false;  // must reset or re-init is blocked
+    this._suppressMoveend = 0;      // reset or moveend stays suppressed after reconnect
     this._poiPending      = 0;
     this._lastFetchBounds = null;
     this._cancelAllPendingFetches();
@@ -749,6 +766,46 @@ class MeerkatMapCard extends HTMLElement {
     if (this._mapInitialised || this._mapIniting) return;
     this._mapIniting = true;
 
+    // Register the page-hide flush handler BEFORE awaiting Leaflet.
+    // If the app is killed or backgrounded during the Leaflet loading window
+    // the handler must already be in place so in-flight POI data is flushed
+    // to storage rather than silently lost.
+    this._flushCacheHandler = (evt) => {
+      // Only flush when the page is actually being hidden/killed.
+      // visibilitychange also fires when the app comes back to the foreground
+      // (visibilityState === 'visible') — we must skip that case or we waste
+      // cycles and risk a misleading write on resume.
+      if (evt && evt.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
+
+      // Flush element data
+      if (this._poiAllElements) {
+        for (const cat of MM_POIS) {
+          const els = this._poiAllElements[cat.key];
+          if (els && Object.keys(els).length > 0) {
+            _mmStorageSet(`mmPOIAll:${cat.key}`, JSON.stringify(Object.values(els)));
+          }
+        }
+      }
+      // Flush region timestamp records — these are the TTL anchors that tell
+      // _isAreaFetched whether cached data is still valid. Without this flush
+      // the card always re-fetches on cold start even though data is present.
+      if (this._fetchedRegions) {
+        const ttl = this._cacheTTL;
+        const now = Date.now();
+        for (const cat of MM_POIS) {
+          const regions = this._fetchedRegions[cat.key];
+          if (!regions || regions.length === 0) continue;
+          const valid = regions.filter(r => now - r.ts < ttl);
+          if (valid.length > 0) {
+            _mmStorageSet(`mmPOIFetched:${cat.key}`, JSON.stringify(valid));
+          }
+        }
+      }
+    };
+    window.addEventListener('pagehide',          this._flushCacheHandler, { capture: true });
+    window.addEventListener('visibilitychange',   this._flushCacheHandler, { capture: true });
+    window.addEventListener('beforeunload',       this._flushCacheHandler, { capture: true });
+
     try {
       // Load Leaflet JS and CSS in parallel.
       // CSS MUST be injected into the shadow root — document.head styles
@@ -816,47 +873,8 @@ class MeerkatMapCard extends HTMLElement {
       window.addEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
 
       // On iOS, the app can be killed without disconnectedCallback firing.
-      // pagehide / visibilitychange / beforeunload give us a last chance to flush
-      // the in-memory accumulator to storage so the next cold launch finds the data.
-      // IMPORTANT: we flush BOTH mmPOIAll: (element data) AND mmPOIFetched: (region
-      // timestamps) — without the latter, _isAreaFetched returns false on cold start
-      // even when element data exists, causing an unnecessary full re-download that
-      // makes the cache appear empty.
-      this._flushCacheHandler = (evt) => {
-        // Only flush when the page is actually being hidden/killed.
-        // visibilitychange also fires when the app comes back to the foreground
-        // (visibilityState === 'visible') — we must skip that case or we waste
-        // cycles and risk a misleading write on resume.
-        if (evt && evt.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
-
-        // Flush element data
-        if (this._poiAllElements) {
-          for (const cat of MM_POIS) {
-            const els = this._poiAllElements[cat.key];
-            if (els && Object.keys(els).length > 0) {
-              _mmStorageSet(`mmPOIAll:${cat.key}`, JSON.stringify(Object.values(els)));
-            }
-          }
-        }
-        // Flush region timestamp records — these are the TTL anchors that tell
-        // _isAreaFetched whether cached data is still valid. Without this flush
-        // the card always re-fetches on cold start even though data is present.
-        if (this._fetchedRegions) {
-          const ttl = this._cacheTTL;
-          const now = Date.now();
-          for (const cat of MM_POIS) {
-            const regions = this._fetchedRegions[cat.key];
-            if (!regions || regions.length === 0) continue;
-            const valid = regions.filter(r => now - r.ts < ttl);
-            if (valid.length > 0) {
-              _mmStorageSet(`mmPOIFetched:${cat.key}`, JSON.stringify(valid));
-            }
-          }
-        }
-      };
-      window.addEventListener('pagehide',          this._flushCacheHandler, { capture: true });
-      window.addEventListener('visibilitychange',   this._flushCacheHandler, { capture: true });
-      window.addEventListener('beforeunload',       this._flushCacheHandler, { capture: true });
+      // pagehide / visibilitychange / beforeunload are registered above (before
+      // the Leaflet await) so the flush fires even if loading is interrupted.
 
       // Load POIs on map move (debounced)
       this._map.on('moveend', () => {
