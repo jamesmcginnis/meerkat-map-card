@@ -849,6 +849,12 @@ class MeerkatMapCard extends HTMLElement {
         maxZoom:     20,
       }).addTo(this._map);
 
+      // Custom panes guarantee DOM z-order regardless of lat-based zIndex math.
+      // POI -> sharing entities -> device to track (highest).
+      this._map.createPane("mmPoiPane");     this._map.getPane("mmPoiPane").style.zIndex     = "500";
+      this._map.createPane("mmSharingPane"); this._map.getPane("mmSharingPane").style.zIndex = "600";
+      this._map.createPane("mmDevicePane");  this._map.getPane("mmDevicePane").style.zIndex  = "700";
+
       this._mapInitialised = true;
       this._mapIniting     = false;
 
@@ -1047,7 +1053,7 @@ class MeerkatMapCard extends HTMLElement {
     if (this._personMarker) {
       this._personMarker.setLatLng([lat, lng]).setIcon(icon);
     } else {
-      this._personMarker = L.marker([lat, lng], { icon, zIndexOffset: 2000 }).addTo(this._map);
+      this._personMarker = L.marker([lat, lng], { icon, pane: "mmDevicePane" }).addTo(this._map);
     }
 
     this._personMarker.off('click');
@@ -1111,7 +1117,7 @@ class MeerkatMapCard extends HTMLElement {
       if (this._familyMarkers[entityId]) {
         this._familyMarkers[entityId].setLatLng([lat, lng]).setIcon(icon);
       } else {
-        this._familyMarkers[entityId] = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(this._map);
+        this._familyMarkers[entityId] = L.marker([lat, lng], { icon, pane: "mmSharingPane" }).addTo(this._map);
       }
       this._familyMarkers[entityId].off('click');
       this._familyMarkers[entityId].on('click', () => this._openFamilyMemberPopup(state, lat, lng));
@@ -2118,7 +2124,7 @@ class MeerkatMapCard extends HTMLElement {
         // cache object causes every marker in the layer to report the same (last-
         // written) coordinates when clicked.
         const snapshot = Object.assign({}, el, { _lat: lat, _lon: lon });
-        const m = L.marker([lat, lon], { icon: poiIcon });
+        const m = L.marker([lat, lon], { icon: poiIcon, pane: "mmPoiPane" });
         m.on('click', (ev) => {
           if (ev.originalEvent) {
             ev.originalEvent.stopPropagation();
