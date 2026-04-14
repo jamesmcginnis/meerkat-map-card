@@ -1047,7 +1047,7 @@ class MeerkatMapCard extends HTMLElement {
     if (this._personMarker) {
       this._personMarker.setLatLng([lat, lng]).setIcon(icon);
     } else {
-      this._personMarker = L.marker([lat, lng], { icon, zIndexOffset: -100 }).addTo(this._map);
+      this._personMarker = L.marker([lat, lng], { icon, zIndexOffset: 2000 }).addTo(this._map);
     }
 
     this._personMarker.off('click');
