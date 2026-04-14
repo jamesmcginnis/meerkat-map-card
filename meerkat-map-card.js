@@ -1111,7 +1111,7 @@ class MeerkatMapCard extends HTMLElement {
       if (this._familyMarkers[entityId]) {
         this._familyMarkers[entityId].setLatLng([lat, lng]).setIcon(icon);
       } else {
-        this._familyMarkers[entityId] = L.marker([lat, lng], { icon, zIndexOffset: -200 }).addTo(this._map);
+        this._familyMarkers[entityId] = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(this._map);
       }
       this._familyMarkers[entityId].off('click');
       this._familyMarkers[entityId].on('click', () => this._openFamilyMemberPopup(state, lat, lng));
@@ -2751,7 +2751,7 @@ class MeerkatMapCardEditor extends HTMLElement {
           <div class="hint" style="margin-bottom:6px;">★ = Person entity (auto-detected). Any entity with GPS coordinates can be tracked.</div>
           <div class="card-block">
             <div class="select-row">
-              <label>Person to track</label>
+              <label>Device to track</label>
               <select id="person_entity">${personOptions}</select>
             </div>
             <div class="select-row" style="border-top:1px solid var(--divider-color,rgba(0,0,0,0.06));padding-top:12px;">
