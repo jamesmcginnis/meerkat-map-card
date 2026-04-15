@@ -28,39 +28,43 @@ async function _mmFetchCSS(url) {
 }
 
 // ── Persistent storage layer ────────────────────────────────────────
-// iOS WKWebView (Home Assistant Companion app) clears localStorage when the
-// app process is fully terminated (swipe-killed). IndexedDB is the only
-// Web Storage API that iOS WKWebView reliably persists across full app kills.
+// IDB schema (version 2) — three object stores:
 //
-// Architecture:
-//   _mmMem   — synchronous in-memory mirror; read path is always instant.
-//   IndexedDB — primary persistent store; survives app kill + app close.
-//   localStorage/sessionStorage — secondary write (best-effort); used as a
-//               fast warm-up path on platforms where IDB open is slow.
+//   kv           — small key-value pairs only: geocode cache (mmGeo:*) and
+//                  last map position (mmMapPos).  Mirrors to _mmMem for
+//                  synchronous reads; also written to localStorage as a fast
+//                  warm-up path on platforms where IDB open is slow.
 //
-// All writes go to _mmMem immediately (so callers never block), then are
-// queued and flushed to IndexedDB asynchronously.  Reads always hit _mmMem.
-// On first load, _mmStorageInit() populates _mmMem from IDB, then from
-// localStorage as a fallback for any keys IDB doesn't have.
+//   poi_elements — one record per OSM element per category.
+//                  keyPath: ['category', 'id']
+//                  Index  : by_category         → bulk getAll per category
+//                  Index  : by_category_fetched  → TTL range deletes
+//                  Records are written immediately on fetch; no whole-category
+//                  blob serialisation, no localStorage quota pressure.
+//
+//   poi_regions  — one record per fetched bounding box per category.
+//                  autoIncrement key; index by_category for reads.
+//                  Drives _isAreaFetched TTL checks (replaces mmPOIFetched: blobs).
+//
+// _mmMem mirrors only kv (geo + mapPos) — POI data is never loaded into the
+// global memory mirror.  Each card instance holds its own _poiAllElements /
+// _fetchedRegions maps that are populated from IDB during _warmCacheFromStorage.
 
-const _mmMem = {};           // in-memory mirror — source of truth for reads
-let   _mmIDB = null;         // IDBDatabase handle, null until opened
+const _mmMem = {};
+let   _mmIDB = null;
 const _mmIDB_NAME    = 'MeerkatMapCard';
-const _mmIDB_STORE   = 'kv';
-const _mmIDB_VERSION = 1;
-let   _mmInitPromise = null; // resolves once IDB is open and _mmMem is warm
+const _mmIDB_VERSION = 2;
+let   _mmInitPromise = null;
 
-// Open IDB, populate _mmMem from it (and fill gaps from localStorage).
-// Returns a Promise that resolves when the store is ready.
 function _mmStorageInit() {
   if (_mmInitPromise) return _mmInitPromise;
   _mmInitPromise = new Promise(resolve => {
-    // --- Seed _mmMem from localStorage synchronously so the card can render
-    //     immediately while IDB is opening asynchronously.
+    // Seed _mmMem from localStorage synchronously for geo/mapPos only.
+    // POI data is no longer stored there, so mmPOI* keys are skipped.
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && (k.startsWith('mmPOI') || k.startsWith('mmGeo:') || k === 'mmMapPos')) {
+        if (k && (k.startsWith('mmGeo:') || k === 'mmMapPos')) {
           const v = localStorage.getItem(k);
           if (v !== null) _mmMem[k] = v;
         }
@@ -73,21 +77,49 @@ function _mmStorageInit() {
     try { req = indexedDB.open(_mmIDB_NAME, _mmIDB_VERSION); } catch (_) { resolve(); return; }
 
     req.onupgradeneeded = e => {
-      try { e.target.result.createObjectStore(_mmIDB_STORE); } catch (_) {}
+      const db = e.target.result;
+
+      // kv store — always ensure it exists (created in v1)
+      if (!db.objectStoreNames.contains('kv')) {
+        db.createObjectStore('kv');
+      }
+
+      // v2: structured POI stores
+      if (e.oldVersion < 2) {
+        const elemStore = db.createObjectStore('poi_elements', { keyPath: ['category', 'id'] });
+        elemStore.createIndex('by_category',         'category',                { unique: false });
+        elemStore.createIndex('by_category_fetched', ['category', 'fetchedAt'], { unique: false });
+
+        const regStore = db.createObjectStore('poi_regions', { autoIncrement: true });
+        regStore.createIndex('by_category', 'category', { unique: false });
+
+        // Evict stale POI blobs from the kv store during migration — they are
+        // orphaned now that poi_elements is the authoritative store.
+        if (e.oldVersion >= 1) {
+          try {
+            const kvStore = e.target.transaction.objectStore('kv');
+            const cur = kvStore.openCursor();
+            cur.onsuccess = ev => {
+              const c = ev.target.result;
+              if (c) { if (c.key.startsWith('mmPOI')) c.delete(); c.continue(); }
+            };
+          } catch (_) {}
+        }
+      }
     };
 
-    req.onerror = () => resolve(); // IDB unavailable — fall back to memory+localStorage
+    req.onerror = () => resolve();
 
     req.onsuccess = e => {
       _mmIDB = e.target.result;
-      // Read all IDB entries into _mmMem — IDB wins over localStorage for same key
+      // Load only kv entries (geo + mapPos) into _mmMem; skip any stale mmPOI* blobs.
       try {
-        const tx  = _mmIDB.transaction(_mmIDB_STORE, 'readonly');
-        const cur = tx.objectStore(_mmIDB_STORE).openCursor();
+        const tx  = _mmIDB.transaction('kv', 'readonly');
+        const cur = tx.objectStore('kv').openCursor();
         cur.onsuccess = ev => {
           const c = ev.target.result;
-          if (c) { _mmMem[c.key] = c.value; c.continue(); }
-          else    resolve(); // cursor exhausted — _mmMem is fully warm
+          if (c) { if (!c.key.startsWith('mmPOI')) _mmMem[c.key] = c.value; c.continue(); }
+          else    resolve();
         };
         cur.onerror = () => resolve();
       } catch (_) { resolve(); }
@@ -99,67 +131,34 @@ function _mmStorageInit() {
 // Kick off init immediately so IDB is ready as soon as possible.
 _mmStorageInit();
 
-// Write to memory immediately; persist to IDB + localStorage asynchronously.
+// ── kv helpers (geo cache + map position only) ──────────────────────
 function _mmStorageSet(key, value) {
   _mmMem[key] = value;
-
-  // Persist to IndexedDB (primary — survives iOS app kills)
   if (_mmIDB) {
     try {
-      const tx = _mmIDB.transaction(_mmIDB_STORE, 'readwrite');
-      tx.onerror = () => {}; // prevent unhandled-rejection noise on iOS under memory pressure
-      tx.objectStore(_mmIDB_STORE).put(value, key);
+      const tx = _mmIDB.transaction('kv', 'readwrite');
+      tx.onerror = () => {};
+      tx.objectStore('kv').put(value, key);
     } catch (_) {}
   } else {
-    // IDB not yet open — retry after init resolves
     _mmStorageInit().then(() => {
       if (_mmIDB) {
         try {
-          const tx = _mmIDB.transaction(_mmIDB_STORE, 'readwrite');
+          const tx = _mmIDB.transaction('kv', 'readwrite');
           tx.onerror = () => {};
-          tx.objectStore(_mmIDB_STORE).put(value, key);
+          tx.objectStore('kv').put(value, key);
         } catch (_) {}
       }
     });
   }
-
-  // Also write to localStorage (secondary — fast warm-up on next load,
-  // survives app backgrounding on Android and desktop browsers).
-  try {
-    localStorage.setItem(key, value);
-  } catch (e) {
-    // Quota exceeded — evict oldest mmPOI* entries and retry once
-    if (e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
-      try {
-        const evictable = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (!k) continue;
-          if (k.startsWith('mmPOIFetched:') || k.startsWith('mmPOIAll:') ||
-              k.startsWith('mmPOI:')        || k.startsWith('mmGeo:')) {
-            const tier = k.startsWith('mmPOIFetched:') ? 0
-                       : k.startsWith('mmPOIAll:')     ? 1
-                       : k.startsWith('mmGeo:')        ? 2 : 3;
-            evictable.push({ k, tier, size: (localStorage.getItem(k) || '').length });
-          }
-        }
-        evictable.sort((a, b) => a.tier - b.tier || b.size - a.size);
-        for (const { k } of evictable) {
-          localStorage.removeItem(k);
-          try { localStorage.setItem(key, value); break; } catch (_) {}
-        }
-      } catch (_) {}
-    }
-  }
-
-  // sessionStorage — survives WiFi↔Mobile switches within the same session
+  // localStorage — fast warm-up on next load; geo strings are tiny so quota
+  // pressure is not a concern here.
+  try { localStorage.setItem(key, value); } catch (_) {}
   try { sessionStorage.setItem(key, value); } catch (_) {}
 }
 
-// Read from in-memory mirror — always synchronous and instant.
 function _mmStorageGet(key) {
   if (_mmMem[key] !== undefined) return _mmMem[key];
-  // Fallback: check sessionStorage for keys written before init completed
   try { const v = sessionStorage.getItem(key); if (v !== null) return v; } catch (_) {}
   return null;
 }
@@ -168,20 +167,164 @@ function _mmStorageRemove(key) {
   delete _mmMem[key];
   if (_mmIDB) {
     try {
-      const tx = _mmIDB.transaction(_mmIDB_STORE, 'readwrite');
+      const tx = _mmIDB.transaction('kv', 'readwrite');
       tx.onerror = () => {};
-      tx.objectStore(_mmIDB_STORE).delete(key);
+      tx.objectStore('kv').delete(key);
     } catch (_) {}
   }
   try { localStorage.removeItem(key); }   catch (_) {}
   try { sessionStorage.removeItem(key); } catch (_) {}
 }
 
-// Returns a list of all mm* keys currently in the store (for cache-size display).
-function _mmStorageKeys() {
-  return Object.keys(_mmMem).filter(
-    k => k.startsWith('mmPOI') || k.startsWith('mmGeo:') || k === 'mmMapPos'
-  );
+// ── Structured POI IDB helpers ───────────────────────────────────────
+// Returns Promise<element[]> for a category.
+function _mmPoiGetElements(category) {
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB) { resolve([]); return; }
+    try {
+      const req = _mmIDB.transaction('poi_elements', 'readonly')
+                        .objectStore('poi_elements')
+                        .index('by_category')
+                        .getAll(category);
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror   = () => resolve([]);
+    } catch (_) { resolve([]); }
+  }));
+}
+
+// Writes new OSM elements for a category to IDB.  Only called when newCount > 0.
+function _mmPoiPutElements(category, elements, fetchedAt) {
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB || !elements.length) { resolve(); return; }
+    try {
+      const tx    = _mmIDB.transaction('poi_elements', 'readwrite');
+      tx.onerror  = () => {};
+      const store = tx.objectStore('poi_elements');
+      for (const el of elements) {
+        const id = el.id != null
+          ? String(el.id)
+          : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
+        if (!id || id === 'undefined,undefined') continue;
+        store.put({ ...el, category, id, fetchedAt });
+      }
+      tx.oncomplete = () => resolve();
+    } catch (_) { resolve(); }
+  }));
+}
+
+// Returns Promise<region[]> for a category.
+function _mmPoiGetRegions(category) {
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB) { resolve([]); return; }
+    try {
+      const req = _mmIDB.transaction('poi_regions', 'readonly')
+                        .objectStore('poi_regions')
+                        .index('by_category')
+                        .getAll(category);
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror   = () => resolve([]);
+    } catch (_) { resolve([]); }
+  }));
+}
+
+// Appends a single bounding-box record for a category.
+function _mmPoiPutRegion(region) {
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB) { resolve(); return; }
+    try {
+      const tx   = _mmIDB.transaction('poi_regions', 'readwrite');
+      tx.onerror = () => {};
+      tx.objectStore('poi_regions').add(region);
+      tx.oncomplete = () => resolve();
+    } catch (_) { resolve(); }
+  }));
+}
+
+// Clears poi_elements and poi_regions entirely.  Returns a Promise.
+function _mmPoiClearAll() {
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB) { resolve(); return; }
+    try {
+      const tx = _mmIDB.transaction(['poi_elements', 'poi_regions'], 'readwrite');
+      tx.onerror    = () => {};
+      tx.objectStore('poi_elements').clear();
+      tx.objectStore('poi_regions').clear();
+      tx.oncomplete = () => resolve();
+    } catch (_) { resolve(); }
+  }));
+}
+
+// Returns Promise<{elements, regions}> record counts for the cache-size display.
+function _mmPoiCountAll() {
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB) { resolve({ elements: 0, regions: 0 }); return; }
+    try {
+      const tx   = _mmIDB.transaction(['poi_elements', 'poi_regions'], 'readonly');
+      const eReq = tx.objectStore('poi_elements').count();
+      const rReq = tx.objectStore('poi_regions').count();
+      let eDone = false, rDone = false, eCount = 0, rCount = 0;
+      const check = () => { if (eDone && rDone) resolve({ elements: eCount, regions: rCount }); };
+      eReq.onsuccess = () => { eCount = eReq.result; eDone = true; check(); };
+      rReq.onsuccess = () => { rCount = rReq.result; rDone = true; check(); };
+      eReq.onerror   = () => { eDone = true; check(); };
+      rReq.onerror   = () => { rDone = true; check(); };
+    } catch (_) { resolve({ elements: 0, regions: 0 }); }
+  }));
+}
+
+
+// Bulk-reads every element from poi_elements in one transaction.
+// Returns Promise<element[]> across all categories.
+function _mmPoiGetAllElements() {
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB) { resolve([]); return; }
+    try {
+      const req = _mmIDB.transaction('poi_elements', 'readonly')
+                        .objectStore('poi_elements')
+                        .getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror   = () => resolve([]);
+    } catch (_) { resolve([]); }
+  }));
+}
+
+// Bulk-reads every region from poi_regions in one transaction.
+// Attaches the IDB auto-increment key as _idbKey so stale records can be deleted.
+// Returns Promise<region[]> across all categories.
+function _mmPoiGetAllRegions() {
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB) { resolve([]); return; }
+    try {
+      const tx    = _mmIDB.transaction('poi_regions', 'readonly');
+      const store = tx.objectStore('poi_regions');
+      const vReq  = store.getAll();
+      const kReq  = store.getAllKeys();
+      let v = null, k = null;
+      const done = () => {
+        if (v !== null && k !== null)
+          resolve(v.map((rec, i) => ({ ...rec, _idbKey: k[i] })));
+      };
+      vReq.onsuccess = () => { v = vReq.result || []; done(); };
+      kReq.onsuccess = () => { k = kReq.result || []; done(); };
+      vReq.onerror = kReq.onerror = () => resolve([]);
+    } catch (_) { resolve([]); }
+  }));
+}
+
+// Deletes specific poi_regions records by their IDB auto-increment keys.
+// Called in the background to evict expired region records after warm-up.
+function _mmPoiDeleteRegions(idbKeys) {
+  if (!idbKeys || !idbKeys.length) return Promise.resolve();
+  return _mmStorageInit().then(() => new Promise(resolve => {
+    if (!_mmIDB) { resolve(); return; }
+    try {
+      const tx      = _mmIDB.transaction('poi_regions', 'readwrite');
+      tx.onerror    = () => {};
+      tx.oncomplete = () => resolve();
+      const store   = tx.objectStore('poi_regions');
+      for (const k of idbKeys) store.delete(k);
+    } catch (_) { resolve(); }
+  }));
 }
 
 // ── Tag matcher: assigns batch-fetched elements back to categories ──
@@ -357,12 +500,10 @@ class MeerkatMapCard extends HTMLElement {
     this._mapCentredOnce = false;
     this._config      = MeerkatMapCard.getStubConfig();
     this._poiFetching = {};
-    this._poiElements = {}; // in-memory element cache for fast reconnect
-    this._poiElementsBounds = null; // bounds at the time _poiElements was captured
     // Global accumulator: catKey → { osmId: element } — survives pans & zooms
     this._poiAllElements = {};
     // Lightweight in-memory record of which areas have been fetched per category.
-    // Mirrors mmPOIFetched:cat in localStorage. Decouples fetch-decision from data.
+    // Mirrors poi_regions rows from IDB. Decouples fetch-decision from element data.
     this._fetchedRegions = {};
     this._batchTimers = [];      // stagger setTimeout IDs — cleared on each new round
     this._retryTimers = new Set(); // retry setTimeout IDs — cleared on pan/abort
@@ -475,70 +616,52 @@ class MeerkatMapCard extends HTMLElement {
   }
 
   // ── Cache warm-up ─────────────────────────────────────────────────
-  // Reads mmPOIAll: (element data) and mmPOIFetched: (region records) from
-  // _mmMem into the card's working memory.  We warm ALL categories, not just
-  // enabled ones, so that:
-  //   (a) toggling a category on instantly shows cached markers, and
-  //   (b) a network switch (WiFi → Mobile) that reconnects the card element
-  //       never causes a false "cache empty" state for enabled categories.
-  //
-  // Two-pass strategy to avoid a blank-map flash:
-  //   Pass 1 (_doWarmFromMem) — synchronous, called immediately.
-  //     _mmMem is already seeded from localStorage by the module-level
-  //     _mmStorageInit() call, so this populates _poiAllElements before
-  //     Leaflet even finishes loading.  POIs are visible on first render.
-  //   Pass 2 — awaits IDB, then calls _doWarmFromMem again.
-  //     On iOS, localStorage can be cleared by the OS between sessions;
-  //     IDB is the only reliable persistent store there.  The second pass
-  //     merges in any IDB-only keys that weren't in localStorage.
+  // Bulk-loads all POI data from IDB in two transactions (one per store) then
+  // distributes into per-category in-memory maps.  Two reads instead of the
+  // old ~100 per-category transactions.  Expired region records are evicted
+  // asynchronously in the background so they never block rendering.
+  // Warms ALL categories so toggling a category on shows cached markers
+  // instantly, and a WiFi→Mobile reconnect never gives a false empty cache.
   async _warmCacheFromStorage() {
-    // Pass 1: populate from whatever is already in _mmMem (localStorage data).
-    this._doWarmFromMem();
-
-    // Pass 2: wait for IDB to finish loading into _mmMem, then merge again.
-    // This picks up IDB-only data (e.g. after iOS clears localStorage).
     await _mmStorageInit();
-    this._doWarmFromMem();
-  }
-
-  // Synchronous inner loop — reads from _mmMem into instance caches.
-  // Safe to call multiple times; guards skip keys already in memory.
-  _doWarmFromMem() {
     if (!this._poiAllElements) this._poiAllElements = {};
     if (!this._fetchedRegions)  this._fetchedRegions  = {};
-    for (const cat of MM_POIS) {
-      // Accumulator — skip if already in memory
-      if (!this._poiAllElements[cat.key] ||
-          Object.keys(this._poiAllElements[cat.key]).length === 0) {
-        try {
-          const raw = _mmStorageGet(`mmPOIAll:${cat.key}`);
-          if (raw) {
-            const arr = JSON.parse(raw);
-            this._poiAllElements[cat.key] = {};
-            for (const el of arr) {
-              const eid = el.id != null
-                ? String(el.id)
-                : `${el.lat ?? el.center?.lat},${el.lon ?? el.center?.lon}`;
-              if (eid && eid !== 'undefined') this._poiAllElements[cat.key][eid] = el;
-            }
-          }
-        } catch (_) {}
-      }
-      // Fetched-region index — skip if already in memory
-      if (!this._fetchedRegions[cat.key]) {
-        try {
-          const raw = _mmStorageGet(`mmPOIFetched:${cat.key}`);
-          if (raw) {
-            const arr = JSON.parse(raw);
-            // Only keep non-expired regions so we don't falsely claim coverage
-            const ttl = this._cacheTTL;
-            const now = Date.now();
-            const valid = arr.filter(r => now - r.ts < ttl);
-            if (valid.length > 0) this._fetchedRegions[cat.key] = valid;
-          }
-        } catch (_) {}
-      }
+
+    // Skip if both caches are already populated (e.g. called again after a pan)
+    const hasElements = MM_POIS.some(c =>
+      this._poiAllElements[c.key] && Object.keys(this._poiAllElements[c.key]).length > 0);
+    const hasRegions = MM_POIS.some(c => this._fetchedRegions[c.key]?.length > 0);
+    if (hasElements && hasRegions) return;
+
+    // Two bulk reads in parallel — entire poi_elements and poi_regions stores
+    const [allElements, allRegions] = await Promise.all([
+      hasElements ? Promise.resolve([]) : _mmPoiGetAllElements(),
+      hasRegions  ? Promise.resolve([]) : _mmPoiGetAllRegions(),
+    ]);
+
+    // Distribute elements into per-category buckets
+    for (const el of allElements) {
+      if (!el.category || !el.id) continue;
+      if (!this._poiAllElements[el.category]) this._poiAllElements[el.category] = {};
+      this._poiAllElements[el.category][el.id] = el;
     }
+
+    // Distribute valid regions; collect stale ones for background eviction
+    const ttl = this._cacheTTL;
+    const now = Date.now();
+    const staleKeys = [];
+    for (const r of allRegions) {
+      if (!r.category) continue;
+      if (now - r.ts >= ttl) {
+        if (r._idbKey != null) staleKeys.push(r._idbKey);
+        continue;
+      }
+      if (!this._fetchedRegions[r.category]) this._fetchedRegions[r.category] = [];
+      this._fetchedRegions[r.category].push(r);
+    }
+
+    // Evict expired regions without blocking — fire and forget
+    if (staleKeys.length) _mmPoiDeleteRegions(staleKeys);
   }
 
   // ── Hass ─────────────────────────────────────────────────────────
@@ -556,8 +679,8 @@ class MeerkatMapCard extends HTMLElement {
 
     this._closeAllOverlays();
     if (this._map) {
-      // Save current position, fetch bounds, and in-memory POI elements so we
-      // can restore them on reconnect without hitting the network again.
+      // Save map position to kv store so it can be restored on reconnect.
+      // POI elements are already persisted to poi_elements IDB store by _renderPOILayer.
       try {
         const c = this._map.getCenter();
         const z = this._map.getZoom();
@@ -568,11 +691,6 @@ class MeerkatMapCard extends HTMLElement {
         // WiFi↔Mobile network switches within the same session).
         _mmStorageSet('mmMapPos', JSON.stringify(payload));
       } catch (_) {}
-      // mmPOIAll: keys are written incrementally by _renderPOILayer (using
-      // _mmStorageSet with eviction), so they are already up-to-date on disk.
-      // Do NOT write the bulky mmPOIElements legacy key here — it duplicates
-      // mmPOIAll: data and consumes extra quota that is the primary reason
-      // the cache appears cleared after a WiFi→Mobile network switch.
       this._map.remove();
       this._map          = null;
       this._tileLayer    = null;
@@ -773,38 +891,29 @@ class MeerkatMapCard extends HTMLElement {
     this._flushCacheHandler = (evt) => {
       // Only flush when the page is actually being hidden/killed.
       // visibilitychange also fires when the app comes back to the foreground
-      // (visibilityState === 'visible') — we must skip that case or we waste
-      // cycles and risk a misleading write on resume.
+      // (visibilityState === 'visible') — we must skip that case.
       if (evt && evt.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
 
-      // Flush element data
-      if (this._poiAllElements) {
-        for (const cat of MM_POIS) {
-          const els = this._poiAllElements[cat.key];
-          if (els && Object.keys(els).length > 0) {
-            _mmStorageSet(`mmPOIAll:${cat.key}`, JSON.stringify(Object.values(els)));
-          }
+      // POI elements and regions are written to IDB immediately on receipt
+      // so no explicit flush is needed here.  Only the map position (a tiny
+      // kv entry) needs a last-chance write since it changes on every pan.
+      try {
+        if (this._map) {
+          const c = this._map.getCenter();
+          const z = this._map.getZoom();
+          const payload = { lat: c.lat, lng: c.lng, zoom: z };
+          if (this._lastFetchBounds) payload.bounds = this._lastFetchBounds;
+          _mmStorageSet('mmMapPos', JSON.stringify(payload));
         }
-      }
-      // Flush region timestamp records — these are the TTL anchors that tell
-      // _isAreaFetched whether cached data is still valid. Without this flush
-      // the card always re-fetches on cold start even though data is present.
-      if (this._fetchedRegions) {
-        const ttl = this._cacheTTL;
-        const now = Date.now();
-        for (const cat of MM_POIS) {
-          const regions = this._fetchedRegions[cat.key];
-          if (!regions || regions.length === 0) continue;
-          const valid = regions.filter(r => now - r.ts < ttl);
-          if (valid.length > 0) {
-            _mmStorageSet(`mmPOIFetched:${cat.key}`, JSON.stringify(valid));
-          }
-        }
-      }
+      } catch (_) {}
     };
     window.addEventListener('pagehide',          this._flushCacheHandler, { capture: true });
     window.addEventListener('visibilitychange',   this._flushCacheHandler, { capture: true });
     window.addEventListener('beforeunload',       this._flushCacheHandler, { capture: true });
+
+    // Kick off IDB warm-up immediately so it runs in parallel with the
+    // Leaflet CDN fetch rather than sequentially after it.
+    const warmPromise = this._warmCacheFromStorage();
 
     try {
       // Load Leaflet JS and CSS in parallel.
@@ -863,8 +972,6 @@ class MeerkatMapCard extends HTMLElement {
       // without this the editor's localStorage clear has no visible effect.
       this._cacheClearedHandler = () => {
         this._poiAllElements  = {};
-        this._poiElements     = {};
-        this._poiElementsBounds = null;
         this._lastFetchBounds = null;
         this._fetchedRegions  = {};
         this._poiFetching     = {};
@@ -942,12 +1049,9 @@ class MeerkatMapCard extends HTMLElement {
         requestAnimationFrame(() => { this._suppressMoveend = Math.max(0, (this._suppressMoveend || 1) - 1); });
         this._updateZoomNotice();
 
-        // Render all cached POI layers from the in-memory accumulator.
-        // We first await _warmCacheFromStorage (which itself awaits IDB init)
-        // so that data persisted to IndexedDB across app kills is in _poiAllElements
-        // before _restorePOIsFromCache iterates it.  Without this chain the
-        // restore runs while _poiAllElements is still empty and renders nothing.
-        _mmStorageInit().then(() => this._warmCacheFromStorage()).then(() => {
+        // IDB warm-up ran in parallel with Leaflet — just await the already-
+        // in-flight promise.  If it already resolved, .then fires immediately.
+        warmPromise.then(() => {
           if (!this._mapInitialised || !this._map) return;
           if (!this._isTooZoomedOut()) {
             this._restorePOIsFromCache();
@@ -1756,23 +1860,35 @@ class MeerkatMapCard extends HTMLElement {
     await this._loadAllPOIs(s, w, n, e);
   }
 
-  // Re-render all enabled POI layers from the in-memory accumulator immediately.
-  // _warmCacheFromStorage has already loaded mmPOIAll: from localStorage so this
+  // Re-render all POI layers from the in-memory accumulator.
+  // _warmCacheFromStorage has already loaded poi_elements from IDB so this
   // is a pure Leaflet render with no blocking I/O.
+  //
+  // Enabled categories are rendered first so the user sees their chosen POIs
+  // in the first paint.  Disabled-but-cached categories follow so they are
+  // ready to display instantly if the user toggles them on — no IDB read needed.
+  // Note: _config may not have arrived yet on reconnect (set hass fires before
+  // setConfig), so we can't skip disabled categories entirely; _loadAllPOIs
+  // removes their layers the moment the real config lands.
   _restorePOIsFromCache() {
     if (!this._mapInitialised || !this._map) return;
     if (!this._poiAllElements) this._poiAllElements = {};
-    // Restore ALL categories that have cached data, regardless of whether
-    // _config has been set yet. On reconnect, set hass can fire before
-    // setConfig, so _config[c.key] may still be the stub default (false).
-    // _loadAllPOIs / setConfig will remove layers for disabled categories
-    // immediately once the real config arrives.
+
+    const hasData = cat =>
+      this._poiAllElements[cat.key] &&
+      Object.keys(this._poiAllElements[cat.key]).length > 0;
+
+    // Pass 1: enabled categories — appear in the first paint
     for (const cat of MM_POIS) {
-      if (this._poiLayers[cat.key]) continue; // already rendered
-      if (this._poiAllElements[cat.key] &&
-          Object.keys(this._poiAllElements[cat.key]).length > 0) {
-        this._renderPOILayer(cat, []);
-      }
+      if (!this._config[cat.key]) continue;
+      if (this._poiLayers[cat.key]) continue;
+      if (hasData(cat)) this._renderPOILayer(cat, []);
+    }
+    // Pass 2: disabled-but-cached categories — ready for instant toggle
+    for (const cat of MM_POIS) {
+      if (this._config[cat.key]) continue;
+      if (this._poiLayers[cat.key]) continue;
+      if (hasData(cat)) this._renderPOILayer(cat, []);
     }
   }
 
@@ -1808,42 +1924,18 @@ class MeerkatMapCard extends HTMLElement {
     // Fast path: check in-memory regions first
     if (coversView(this._fetchedRegions?.[cat.key])) return true;
 
-    // Fallback: check storage and warm the in-memory cache on hit.
-    // Strip expired entries before promoting to memory — without this a stale
-    // region read from IDB/localStorage bypasses the TTL check entirely and
-    // prevents the card from ever re-fetching that area after expiry.
-    try {
-      const raw = _mmStorageGet(`mmPOIFetched:${cat.key}`);
-      if (!raw) return false;
-      const stored = JSON.parse(raw);
-      const validStored = stored.filter(r => nowMs - r.ts < ttl);
-      if (coversView(validStored)) {
-        if (!this._fetchedRegions) this._fetchedRegions = {};
-        this._fetchedRegions[cat.key] = validStored;
-        return true;
-      }
-    } catch (_) {}
+    // _fetchedRegions is fully populated from IDB during _warmCacheFromStorage
+    // before any _isAreaFetched call is made, so no storage fallback is needed.
     return false;
   }
 
   _saveFetchedRegion(cat, s, w, n, e) {
-    const entry = { s, w, n, e, ts: Date.now() };
-    if (!this._fetchedRegions)           this._fetchedRegions = {};
-    if (!this._fetchedRegions[cat.key])  this._fetchedRegions[cat.key] = [];
+    const entry = { category: cat.key, s, w, n, e, ts: Date.now() };
+    if (!this._fetchedRegions)          this._fetchedRegions = {};
+    if (!this._fetchedRegions[cat.key]) this._fetchedRegions[cat.key] = [];
     this._fetchedRegions[cat.key].push(entry);
-    try {
-      const raw = _mmStorageGet(`mmPOIFetched:${cat.key}`);
-      let arr = raw ? JSON.parse(raw) : [];
-      arr.push(entry);
-      // Prune expired entries first (they are worthless disk space)
-      const ttl = this._cacheTTL;
-      const now = Date.now();
-      arr = arr.filter(r => now - r.ts < ttl);
-      // Then cap at 50 entries per category (was 200 — the extra entries
-      // never help cache-hit rate and waste quota budget)
-      if (arr.length > 50) arr.splice(0, arr.length - 50);
-      _mmStorageSet(`mmPOIFetched:${cat.key}`, JSON.stringify(arr));
-    } catch (_) {}
+    // Write to the structured poi_regions store — no blobs, no quota pressure.
+    _mmPoiPutRegion(entry);
   }
 
   // ── Batch fetch: one Overpass request for up to 5 categories ─────────
@@ -2083,15 +2175,10 @@ class MeerkatMapCard extends HTMLElement {
         newCount++;
       }
     }
-    // Only persist to localStorage when new data was actually merged.
-    // Skipping the write on cache-restore calls (elements=[]) avoids N
-    // redundant writes on every cold start — each write risks triggering
-    // quota-eviction that could silently discard another category's data.
+    // Only persist when new data was actually merged — skip on cache-restore
+    // calls (elements=[]) to avoid redundant IDB writes on cold start.
     if (newCount > 0) {
-      _mmStorageSet(
-        `mmPOIAll:${cat.key}`,
-        JSON.stringify(Object.values(this._poiAllElements[cat.key]))
-      );
+      _mmPoiPutElements(cat.key, elements, Date.now());
     }
 
     // ── Build markers from ALL accumulated elements ─────────────────
@@ -2139,14 +2226,6 @@ class MeerkatMapCard extends HTMLElement {
     const newLayer = L.layerGroup(markers.filter(Boolean)).addTo(this._map);
     if (this._poiLayers[cat.key]) this._map.removeLayer(this._poiLayers[cat.key]);
     this._poiLayers[cat.key] = newLayer;
-
-    // Keep the legacy in-memory mirrors in sync so disconnectedCallback's
-    // localStorage writes stay consistent, but do NOT write the bulky
-    // mmPOIElements key to disk — mmPOIAll: is the authoritative store and
-    // writing a second copy doubles quota usage unnecessarily.
-    if (!this._poiElements) this._poiElements = {};
-    this._poiElements[cat.key] = allElements;
-    if (this._lastFetchBounds) this._poiElementsBounds = this._lastFetchBounds;
   }
 
   // ── POI popup ─────────────────────────────────────────────────────
@@ -2576,23 +2655,12 @@ class MeerkatMapCard extends HTMLElement {
   _forceRefreshPOIs() {
     // Cancel all in-flight requests and pending timers
     this._cancelAllPendingFetches();
-    this._poiElements = {};  // clear in-memory cache so stale data cannot be restored
-    this._poiElementsBounds = null;
     this._lastFetchBounds = null; // bypass bounds check
     this._poiAllElements = {}; // clear global accumulator
     this._fetchedRegions = {}; // clear in-memory fetched-regions index
 
-    // Clear all POI cache entries from every storage layer (IDB + localStorage + _mmMem)
-    try {
-      const keys = _mmStorageKeys().filter(k =>
-        k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') ||
-        k.startsWith('mmPOIFetched:') || k.startsWith('mmGeo:')
-      );
-      keys.forEach(k => _mmStorageRemove(k));
-      _mmStorageRemove('mmPOIElements');
-      _mmStorageRemove('mmPOIElementsBounds');
-    } catch (_) {}
-
+    // Clear structured POI stores from IDB then trigger a fresh fetch.
+    _mmPoiClearAll();
     this._loadAllPOIs();
   }
 
@@ -3082,53 +3150,27 @@ class MeerkatMapCardEditor extends HTMLElement {
     const clearBtn = root.getElementById('mm-clear-cache-btn');
     const cacheSizeEl = root.getElementById('mm-cache-size');
 
-    // Helper: compute total POI cache size from the in-memory mirror
-    // (covers IDB + localStorage + sessionStorage — all share the same _mmMem)
-    const _computeCacheSize = () => {
-      try {
-        let bytes = 0;
-        let entries = 0;
-        const keys = _mmStorageKeys();
-        for (const k of keys) {
-          if (k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') ||
-              k.startsWith('mmPOIFetched:') || k.startsWith('mmGeo:') ||
-              k === 'mmPOIElements' || k === 'mmPOIElementsBounds') {
-            const v = _mmStorageGet(k) || '';
-            bytes += (k.length + v.length) * 2;
-            entries++;
-          }
-        }
-        if (entries === 0) return 'Cache is empty';
-        const kb = bytes / 1024;
-        const sizeStr = kb < 1024
-          ? `${kb.toFixed(1)} KB`
-          : `${(kb / 1024).toFixed(2)} MB`;
-        return `Cache: ${sizeStr} across ${entries} stored region${entries !== 1 ? 's' : ''}`;
-      } catch (_) { return ''; }
-    };
-
-    // Populate size on load — wait for IDB init so the count is accurate
-    _mmStorageInit().then(() => {
-      if (cacheSizeEl) cacheSizeEl.textContent = _computeCacheSize();
+    // Populate cache size from IDB record counts.
+    _mmPoiCountAll().then(({ elements, regions }) => {
+      if (!cacheSizeEl) return;
+      if (elements === 0) {
+        cacheSizeEl.textContent = 'Cache is empty';
+      } else {
+        cacheSizeEl.textContent =
+          `Cache: ${elements.toLocaleString()} element${elements !== 1 ? 's' : ''} across ${regions} region${regions !== 1 ? 's' : ''}`;
+      }
     });
 
     if (clearBtn) clearBtn.onclick = () => {
       if (confirm('Clear all saved POI data from this device?')) {
-        try {
-          const keys = _mmStorageKeys().filter(k =>
-            k.startsWith('mmPOI:') || k.startsWith('mmPOIAll:') ||
-            k.startsWith('mmPOIFetched:') || k.startsWith('mmGeo:')
-          );
-          keys.forEach(k => _mmStorageRemove(k));
-          _mmStorageRemove('mmPOIElements');
-          _mmStorageRemove('mmPOIElementsBounds');
-          // Notify any live card instances on this page so they wipe their
-          // in-memory state and remove POI layers immediately.
+        _mmPoiClearAll().then(() => {
+          // Notify any live card instances so they wipe their in-memory state
+          // and remove POI layers immediately.
           window.dispatchEvent(new CustomEvent('meerkat-cache-cleared'));
-          clearBtn.textContent = `Cleared ${keys.length} entries`;
+          clearBtn.textContent = 'Cleared';
           if (cacheSizeEl) cacheSizeEl.textContent = 'Cache is empty';
           setTimeout(() => { clearBtn.textContent = 'Clear All Cached POI Data'; }, 2000);
-        } catch (_) {}
+        });
       }
     };
 
