@@ -289,41 +289,20 @@ function _mmPoiGetAllElements() {
 }
 
 // Bulk-reads every region from poi_regions in one transaction.
-// Attaches the IDB auto-increment key as _idbKey so stale records can be deleted.
+// Uses getAll() only — getAllKeys() is unreliable on iOS WKWebView.
+// Stale records are filtered in memory by TTL; no explicit deletion needed
+// (they are tiny and the Clear Cache button handles full cleanup).
 // Returns Promise<region[]> across all categories.
 function _mmPoiGetAllRegions() {
   return _mmStorageInit().then(() => new Promise(resolve => {
     if (!_mmIDB) { resolve([]); return; }
     try {
-      const tx    = _mmIDB.transaction('poi_regions', 'readonly');
-      const store = tx.objectStore('poi_regions');
-      const vReq  = store.getAll();
-      const kReq  = store.getAllKeys();
-      let v = null, k = null;
-      const done = () => {
-        if (v !== null && k !== null)
-          resolve(v.map((rec, i) => ({ ...rec, _idbKey: k[i] })));
-      };
-      vReq.onsuccess = () => { v = vReq.result || []; done(); };
-      kReq.onsuccess = () => { k = kReq.result || []; done(); };
-      vReq.onerror = kReq.onerror = () => resolve([]);
+      const req = _mmIDB.transaction('poi_regions', 'readonly')
+                        .objectStore('poi_regions')
+                        .getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror   = () => resolve([]);
     } catch (_) { resolve([]); }
-  }));
-}
-
-// Deletes specific poi_regions records by their IDB auto-increment keys.
-// Called in the background to evict expired region records after warm-up.
-function _mmPoiDeleteRegions(idbKeys) {
-  if (!idbKeys || !idbKeys.length) return Promise.resolve();
-  return _mmStorageInit().then(() => new Promise(resolve => {
-    if (!_mmIDB) { resolve(); return; }
-    try {
-      const tx      = _mmIDB.transaction('poi_regions', 'readwrite');
-      tx.onerror    = () => {};
-      tx.oncomplete = () => resolve();
-      const store   = tx.objectStore('poi_regions');
-      for (const k of idbKeys) store.delete(k);
-    } catch (_) { resolve(); }
   }));
 }
 
@@ -646,22 +625,15 @@ class MeerkatMapCard extends HTMLElement {
       this._poiAllElements[el.category][el.id] = el;
     }
 
-    // Distribute valid regions; collect stale ones for background eviction
+    // Distribute valid regions; stale ones are skipped (TTL filtered in memory)
     const ttl = this._cacheTTL;
     const now = Date.now();
-    const staleKeys = [];
     for (const r of allRegions) {
       if (!r.category) continue;
-      if (now - r.ts >= ttl) {
-        if (r._idbKey != null) staleKeys.push(r._idbKey);
-        continue;
-      }
+      if (now - r.ts >= ttl) continue; // expired — ignore until next fetch overwrites
       if (!this._fetchedRegions[r.category]) this._fetchedRegions[r.category] = [];
       this._fetchedRegions[r.category].push(r);
     }
-
-    // Evict expired regions without blocking — fire and forget
-    if (staleKeys.length) _mmPoiDeleteRegions(staleKeys);
   }
 
   // ── Hass ─────────────────────────────────────────────────────────
