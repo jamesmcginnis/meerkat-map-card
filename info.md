@@ -24,7 +24,9 @@ Tap the map pin button in the top-right controls to open a bottom sheet where yo
 
 ## Points of interest
 
-53 POI categories across 8 groups, toggled individually in the visual editor. Data is fetched from OpenStreetMap via Overpass API and cached locally. All POIs fetched across every area you visit are accumulated and kept — panning or zooming never causes previously loaded markers to disappear. Returning to any visited location — including reopening the app or navigating away and back — restores all markers instantly from cache with no network request.
+53 POI categories across 8 groups, toggled individually in the visual editor. Data is fetched from OpenStreetMap via Overpass API and cached locally using IndexedDB. All POIs fetched across every area you visit are accumulated and kept — panning or zooming never causes previously loaded markers to disappear. Returning to any visited location — including reopening the app or navigating away and back — restores all markers instantly from cache with no network request.
+
+POIs are only fetched and displayed when zoomed in to level 13 or above. A notice appears on the map when you are zoomed out too far, and cached markers are hidden until you zoom back in.
 
 > **Note:** Enable only a small number of categories at once, especially on mobile. A small selection of the most useful categories works best.
 
