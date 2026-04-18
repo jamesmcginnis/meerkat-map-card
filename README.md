@@ -17,6 +17,7 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 - **Sharing** — track additional people, devices, or any GPS entity alongside yourself; each appears as its own marker with its current address and distance from you
 - **Points of interest** — 53 categories across 8 groups, fetched from OpenStreetMap via Overpass API
 - **Persistent POI caching** — all fetched POIs accumulate across every area you visit; panning, zooming, navigating away, or fully closing and reopening the app never causes previously loaded markers to disappear — revisiting any location restores markers instantly from cache with no network request
+- **POI zoom gate** — POIs are only loaded when zoomed in to level 13 or above; a notice appears when zoomed out too far, and existing cached markers are hidden until you zoom back in
 - **POI status ring** — indicator beneath the map controls showing loading, success, and error states with a centre button to stop or refresh
 - **POI popup** — tap any POI to see name, category, address, distance from person, opening hours, phone (tap to call — a styled confirmation sheet appears before dialling), website (icon clickable), and any available extra details such as cuisine, wheelchair access, fees, operator, brand, and network
 - **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
@@ -67,7 +68,7 @@ To fix this, install the **Home Assistant Web Proxy** integration. It routes Ove
 
 ### Step 2 — Add the Overpass URL patterns
 
-The card races all three Overpass mirrors simultaneously through the proxy and uses whichever responds first. Add all three for the fastest possible load times:
+The card races all three Overpass mirrors simultaneously and uses whichever responds first. Add all three for the fastest possible load times:
 
 1. Settings → Devices & Services → find **Home Assistant Web Proxy** → **Configure**
 1. Click **+ ADD** and enter `https://overpass-api.de/*`
@@ -77,7 +78,7 @@ The card races all three Overpass mirrors simultaneously through the proxy and u
 
 No restart needed after step 2.
 
-> **Why three mirrors?** Each is an independent Overpass server in a different location. The card tries them sequentially — primary first, falling back to the others only if it fails — to avoid unnecessary quota usage.
+> **Why three mirrors?** Each is an independent Overpass server in a different location. The card races all three simultaneously and uses the first response, with a 20-second timeout per mirror so a slow server never blocks the others.
 
 -----
 
@@ -147,11 +148,13 @@ In the editor, the Sharing list shows all entities with GPS coordinates, with a 
 
 > ⚠️ **Performance note:** Enable only a small number of POI categories at once, especially on mobile. Each batch of up to 5 categories uses one network request — enabling more increases load time.
 
-POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) and stored in a persistent local cache. The cache is cumulative — every POI fetched across every area you visit is accumulated and never discarded when you pan, zoom, navigate away, or fully close and reopen the app. Returning to any previously visited location restores all markers instantly from cache with no network request and no loading indicator. The cache duration is configurable in the visual editor (default 48 hours — recommended).
+> ⚠️ **Zoom note:** POIs are only fetched and displayed when zoomed in to level 13 or above. A notice appears on the map when you are zoomed out too far. Existing cached markers are hidden until you zoom back in.
+
+POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) and stored in a persistent local cache using IndexedDB. The cache is cumulative — every POI fetched across every area you visit is accumulated and never discarded when you pan, zoom, navigate away, or fully close and reopen the app. Returning to any previously visited location restores all markers instantly from cache with no network request and no loading indicator. The cache duration is configurable in the visual editor (default 48 hours — recommended).
 
 The card includes several optimisations to minimise load time and network usage:
 
-- All fetched POIs accumulate in a global cache across the entire session — panning and zooming never causes markers to disappear
+- All fetched POIs accumulate in a persistent IndexedDB cache — panning and zooming never causes markers to disappear
 - Up to 5 categories are batched into a single network request
 - Three Overpass mirrors are raced simultaneously — the fastest response wins
 - Each mirror has a 20-second timeout so a slow server never blocks the others
@@ -235,7 +238,7 @@ Without this option the card falls back to [Nominatim](https://nominatim.openstr
 - Map tiles are loaded from [CARTO](https://carto.com/) (OpenStreetMap data)
 - POI data is fetched from the [Overpass API](https://overpass-api.de/) and two public mirrors — only the visible map bounding box is sent, no personal data
 - Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
-- POI results are cached in your browser's `localStorage` and `sessionStorage` only — nothing is sent to any third party beyond the API calls above
+- POI results are stored in your browser's **IndexedDB** only — nothing is sent to any third party beyond the API calls above
 - No analytics, no accounts, no tracking
 
 -----
