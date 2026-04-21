@@ -1,5 +1,7 @@
 # Meerkat Map Card
 
+NOT CURRENTLY WORKING DUE TO DEAD PROXIES...I'M WORKING ON A FIX
+
 ![Preview](preview.png)
 
 Track a person entity on a live OpenStreetMap with an animated pulsing marker, points of interest, distance calculations, full address lookup, and shared location tracking — all from a single Lovelace card.
