@@ -1787,9 +1787,10 @@ class MeerkatMapCard extends HTMLElement {
     const signal = this._fetchAbortCtrl.signal;
 
     // Reset ring for this generation
-    this._ringGen   = gen;
-    this._ringTotal = 0;
-    this._ringDone  = 0;
+    this._ringGen    = gen;
+    this._ringTotal  = 0;
+    this._ringDone   = 0;
+    this._ringFailed = 0;
 
     // Fire batches sequentially with a staggered delay rather than all at once.
     // Firing all batches concurrently (old behaviour) could mean 10+ simultaneous
@@ -2027,7 +2028,7 @@ class MeerkatMapCard extends HTMLElement {
     const mirrorUrls = [
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.private.coffee/api/interpreter?data=${encodedQ}`,
-      `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
+      `https://overpass.osm.ch/api/interpreter?data=${encodedQ}`,
     ];
     const tryFetch = url => {
       const timeout = new Promise((_, reject) => {
@@ -2551,7 +2552,7 @@ class MeerkatMapCard extends HTMLElement {
 
   _stopFetch() {
     this._cancelAllPendingFetches();
-    this._ringTotal = 0; this._ringDone = 0;
+    this._ringTotal = 0; this._ringDone = 0; this._ringFailed = 0;
     this._setRingState('idle');
   }
 
