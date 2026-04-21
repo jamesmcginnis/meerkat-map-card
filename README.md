@@ -73,7 +73,7 @@ The card tries three Overpass mirrors in sequence and uses the first one that re
 1. Settings → Devices & Services → find **Home Assistant Web Proxy** → **Configure**
 1. Click **+ ADD** and enter `https://overpass-api.de/*`
 1. Click **+ ADD** again and enter `https://overpass.private.coffee/*`
-1. Click **+ ADD** again and enter `https://maps.mail.ru/*`
+1. Click **+ ADD** again and enter `https://overpass.osm.ch/*`
 1. Click **Save**
 
 No restart needed after step 2.
