@@ -44,7 +44,7 @@ The iOS companion app blocks direct requests to external APIs, which prevents po
 
 - `https://overpass-api.de/*`
 - `https://overpass.private.coffee/*`
-- `https://maps.mail.ru/*`
+- `https://overpass.osm.ch/*`
 
 The card always tries the proxy first — it routes requests through your HA server, making them same-origin and safe on iOS. If the proxy is not installed or unreachable, the card falls back to direct connections automatically. No card configuration is needed.
 
