@@ -1027,11 +1027,16 @@ class MeerkatMapCard extends HTMLElement {
           if (!this._mapInitialised || !this._map) return;
           if (!this._isTooZoomedOut()) {
             this._restorePOIsFromCache();
+            // Trigger an initial fetch for any enabled categories not already
+            // covered by the cache.  setConfig's _loadAllPOIs call fires before
+            // _mapInitialised becomes true (IDB is faster than the Leaflet CDN
+            // fetch), so without this the initial fetch never happens and POIs
+            // only appear after the user manually pans.
+            // _loadAllPOIs is a no-op for any category whose area is already
+            // cached, so this never causes redundant network requests.
+            this._loadAllPOIs();
           }
         });
-
-        // No automatic fetch on startup — cached POIs are rendered above.
-        // The moveend handler will fetch only when the user pans to an uncached area.
       });
 
     } catch (e) {
