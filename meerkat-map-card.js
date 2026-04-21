@@ -2026,7 +2026,7 @@ class MeerkatMapCard extends HTMLElement {
     const opts = { signal };
     const mirrorUrls = [
       `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
-      `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
+      `https://overpass.private.coffee/api/interpreter?data=${encodedQ}`,
       `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQ}`,
     ];
     const tryFetch = url => {
@@ -2114,7 +2114,9 @@ class MeerkatMapCard extends HTMLElement {
           continue;
         }
         if (ex?.code === 'timeout') continue;
-        break;
+        // Network/CORS error on this mirror — try the next one rather than giving up,
+        // since each direct mirror is an independent server and others may still work.
+        continue;
       }
     }
 
