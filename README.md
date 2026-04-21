@@ -1,6 +1,6 @@
 # Meerkat Map Card
 
-NOT CURRENTLY WORK DUE TO DEAD PROXIES...I'M WORKING ON A FIX
+NOT CURRENTLY WORKING DUE TO DEAD PROXIES...I'M WORKING ON A FIX
 
 A custom Home Assistant Lovelace card that tracks a person entity on a live OpenStreetMap with an animated location marker, address lookups, distance calculations, and shared location tracking for people and devices.
 
