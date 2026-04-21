@@ -1027,14 +1027,6 @@ class MeerkatMapCard extends HTMLElement {
           if (!this._mapInitialised || !this._map) return;
           if (!this._isTooZoomedOut()) {
             this._restorePOIsFromCache();
-            // Trigger an initial fetch for any enabled categories not already
-            // covered by the cache.  setConfig's _loadAllPOIs call fires before
-            // _mapInitialised becomes true (IDB is faster than the Leaflet CDN
-            // fetch), so without this the initial fetch never happens and POIs
-            // only appear after the user manually pans.
-            // _loadAllPOIs is a no-op for any category whose area is already
-            // cached, so this never causes redundant network requests.
-            this._loadAllPOIs();
           }
         });
       });
@@ -1071,6 +1063,15 @@ class MeerkatMapCard extends HTMLElement {
       } catch (_) {}
       this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
       this._mapCentredOnce = true;
+      // Now that the map is correctly positioned on the person, trigger the
+      // initial POI fetch.  This is the only reliable place to do this:
+      // setConfig's callback fires before _mapInitialised becomes true (IDB
+      // resolves faster than the Leaflet CDN fetch), and calling _loadAllPOIs
+      // from warmPromise.then risks using the map's default centre ([51.5,
+      // -0.12]) if the person entity's lat/lng aren't available yet.
+      // _loadAllPOIs is a no-op for any category already covered by a valid
+      // cached region, so this never causes redundant network requests.
+      if (!this._isTooZoomedOut()) this._loadAllPOIs();
     }
 
     this._updatePersonMarker(state, lat, lng);
