@@ -43,7 +43,7 @@ A small ring beneath the map controls in the top-right corner shows the current 
 The iOS companion app blocks direct requests to external APIs, which prevents points of interest from loading. To fix this, install the free **Home Assistant Web Proxy** integration via HACS (Integrations), then add the following three URL patterns in its configuration:
 
 - `https://overpass-api.de/*`
-- `https://overpass.kumi.systems/*`
+- `https://overpass.private.coffee/*`
 - `https://maps.mail.ru/*`
 
 The card always tries the proxy first — it routes requests through your HA server, making them same-origin and safe on iOS. If the proxy is not installed or unreachable, the card falls back to direct connections automatically. No card configuration is needed.
