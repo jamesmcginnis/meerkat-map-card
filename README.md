@@ -68,17 +68,17 @@ To fix this, install the **Home Assistant Web Proxy** integration. It routes Ove
 
 ### Step 2 — Add the Overpass URL patterns
 
-The card races all three Overpass mirrors simultaneously and uses whichever responds first. Add all three for the fastest possible load times:
+The card tries three Overpass mirrors in sequence and uses the first one that responds successfully. Add all three to ensure the fastest possible fallback:
 
 1. Settings → Devices & Services → find **Home Assistant Web Proxy** → **Configure**
 1. Click **+ ADD** and enter `https://overpass-api.de/*`
-1. Click **+ ADD** again and enter `https://overpass.kumi.systems/*`
+1. Click **+ ADD** again and enter `https://overpass.private.coffee/*`
 1. Click **+ ADD** again and enter `https://maps.mail.ru/*`
 1. Click **Save**
 
 No restart needed after step 2.
 
-> **Why three mirrors?** Each is an independent Overpass server in a different location. The card races all three simultaneously and uses the first response, with a 20-second timeout per mirror so a slow server never blocks the others.
+> **Why three mirrors?** Each is an independent Overpass server in a different location. The card tries them in sequence — if the primary mirror is rate-limited, busy, or unreachable, it falls back to the next automatically.
 
 -----
 
@@ -156,7 +156,7 @@ The card includes several optimisations to minimise load time and network usage:
 
 - All fetched POIs accumulate in a persistent IndexedDB cache — panning and zooming never causes markers to disappear
 - Up to 5 categories are batched into a single network request
-- Three Overpass mirrors are raced simultaneously — the fastest response wins
+- Three Overpass mirrors are tried in sequence — if one fails or is rate-limited, the next is used automatically
 - Each mirror has a 20-second timeout so a slow server never blocks the others
 - A 25% expanded area is fetched on first load so short pans are already cached
 - Zooming in never triggers a refetch — the data is already loaded
