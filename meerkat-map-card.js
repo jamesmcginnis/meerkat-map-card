@@ -1748,10 +1748,6 @@ class MeerkatMapCard extends HTMLElement {
     const enabled = MM_POIS.filter(c => this._config[c.key]);
     if (!enabled.length) return;
 
-    console.debug('[Meerkat] _loadAllPOIs bounds:', { s: s.toFixed(4), w: w.toFixed(4), n: n.toFixed(4), e: e.toFixed(4) },
-      'centre:', { lat: ((s+n)/2).toFixed(4), lng: ((w+e)/2).toFixed(4) },
-      'enabled:', enabled.map(c => c.key));
-
     // Pre-render: for any enabled category that has accumulated elements but
     // no current layer (e.g. category just toggled on, or layer was removed),
     // render from the global accumulator immediately so markers appear while
@@ -1941,7 +1937,6 @@ class MeerkatMapCard extends HTMLElement {
     const encodedQ = encodeURIComponent(query);
 
     const finish = (elements) => {
-      console.debug('[Meerkat] finish: received', elements.length, 'elements from Overpass');
       // Split the flat results back into per-category buckets by tag matching
       const byKey = {};
       toFetch.forEach(c => { byKey[c.key] = []; });
@@ -2192,7 +2187,6 @@ class MeerkatMapCard extends HTMLElement {
     const poiIcon = L.divIcon({ html: iconHTML, className: '', iconSize: [sz, sz], iconAnchor: [sz/2, sz/2] });
 
     const allElements = Object.values(this._poiAllElements[cat.key]);
-    console.debug('[Meerkat] renderPOILayer:', cat.key, '— accumulator:', allElements.length, 'elements, new els passed in:', elements.length);
     const markers = allElements
       .map(el => {
         var lat = el.lat != null ? el.lat : (el.center ? el.center.lat : null);
