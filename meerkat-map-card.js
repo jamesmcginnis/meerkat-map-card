@@ -248,7 +248,6 @@ class MeerkatMapCard extends HTMLElement {
     }
     this._mapInitialised  = false;
     this._mapIniting      = false;  // must reset or re-init is blocked
-    this._suppressMoveend = 0;      // reset or moveend stays suppressed after reconnect
     if (this._cacheClearedHandler) {
       window.removeEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
       this._cacheClearedHandler = null;
@@ -362,9 +361,6 @@ class MeerkatMapCard extends HTMLElement {
     });
   }
 
-  // ── Zoom helper ───────────────────────────────────────────────────
-  _updateZoomNotice() { /* no-op: zoom notice removed with POI */ }
-
 
   async _initMap() {
     if (this._mapInitialised || this._mapIniting) return;
@@ -372,7 +368,7 @@ class MeerkatMapCard extends HTMLElement {
 
     // Kick off IDB warm-up immediately so it runs in parallel with the
     // Leaflet CDN fetch rather than sequentially after it.
-    const warmPromise = this._warmCacheFromStorage();
+    this._warmCacheFromStorage();
 
     try {
       // Load Leaflet JS and CSS in parallel.
@@ -425,21 +421,11 @@ class MeerkatMapCard extends HTMLElement {
       this._mapInitialised = true;
       this._mapIniting     = false;
 
-      // Listen for cache-clear events fired by the visual editor so the live
-      // card wipes its in-memory state and removes all POI layers immediately —
-      // without this the editor's localStorage clear has no visible effect.
+      // Listen for cache-clear events fired by the visual editor.
       this._cacheClearedHandler = () => {
         this._geocodeCache = {};
       };
       window.addEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
-
-      // On iOS, the app can be killed without disconnectedCallback firing.
-      // pagehide / visibilitychange / beforeunload are registered above (before
-      // the Leaflet await) so the flush fires even if loading is interrupted.
-
-      this._map.on('moveend', () => {
-        this._updateZoomNotice();
-      });
 
       // Hide loading overlay
       const loadEl = this.shadowRoot.getElementById('mm-loading');
@@ -449,16 +435,7 @@ class MeerkatMapCard extends HTMLElement {
       // it is fully visible. Without this tiles only load in a small region.
       requestAnimationFrame(() => {
         this._map.invalidateSize({ animate: false });
-        // Suppress the moveend handler during the initial setView so that
-        // centring the map on the person does not schedule a network fetch.
-        this._suppressMoveend = (this._suppressMoveend || 0) + 1;
         this._updateMap();
-        requestAnimationFrame(() => { this._suppressMoveend = Math.max(0, (this._suppressMoveend || 1) - 1); });
-        this._updateZoomNotice();
-
-        warmPromise.then(() => {
-          if (!this._mapInitialised || !this._map) return;
-        });
       });
 
     } catch (e) {
@@ -815,6 +792,14 @@ class MeerkatMapCard extends HTMLElement {
       return miles < 0.1 ? `${Math.round(metres)} m` : `${miles.toFixed(1)} mi`;
     }
     return metres < 1000 ? `${Math.round(metres)} m` : `${(metres/1000).toFixed(1)} km`;
+  }
+
+  // ── Close all overlays ────────────────────────────────────────────
+  _closeAllOverlays() {
+    if (this._activeOverlay) {
+      this._activeOverlay.remove();
+      this._activeOverlay = null;
+    }
   }
 
   // ── Person info popup ─────────────────────────────────────────────
@@ -1393,7 +1378,6 @@ class MeerkatMapCardEditor extends HTMLElement {
     if (el('zoom_level'))      el('zoom_level').value      = cfg.zoom_level      || 15;
     root.querySelectorAll('input[name="theme"]').forEach(r => r.checked = r.value === (cfg.theme || 'dark'));
     root.querySelectorAll('input[name="person_icon_size"]').forEach(r => r.checked = r.value === (cfg.person_icon_size || 'medium'));
-    root.querySelectorAll('input[data-key]').forEach(r => r.checked = !!cfg[r.dataset.key]);
     // Use setTimeout so the re-render doesn't destroy DOM mid-event (e.g. button click)
     setTimeout(() => this._buildFamilyList(), 0);
   }
