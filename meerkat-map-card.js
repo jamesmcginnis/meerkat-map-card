@@ -2036,10 +2036,7 @@ class MeerkatMapCard extends HTMLElement {
   // ── Multi-strategy Overpass fetcher ───────────────────────────────
   async _fetchOverpass(encodedQ, signal) {
     const opts = { signal };
-    const token = this._hass?.auth?.data?.access_token;
-    const proxyOpts = token
-      ? { signal, headers: { 'Authorization': `Bearer ${token}` } }
-      : opts;
+    const proxyOpts = { signal, credentials: 'include' };
     const mirrorUrls = [
       `https://overpass.private.coffee/api/interpreter?data=${encodedQ}`,
     ];
