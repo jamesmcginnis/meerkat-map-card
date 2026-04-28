@@ -196,7 +196,6 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Config ───────────────────────────────────────────────────────
   setConfig(config) {
-    const prev = this._config || {};
     this._config = { ...MeerkatMapCard.getStubConfig(), ...config };
   }
 
@@ -354,9 +353,6 @@ class MeerkatMapCard extends HTMLElement {
     this._mapIniting = true;
 
     // Register the page-hide flush handler BEFORE awaiting Leaflet.
-    // If the app is killed or backgrounded during the Leaflet loading window
-
-    // to storage rather than silently lost.
     this._flushCacheHandler = (evt) => {
       // Only flush when the page is actually being hidden/killed.
       // visibilitychange also fires when the app comes back to the foreground
@@ -476,13 +472,10 @@ class MeerkatMapCard extends HTMLElement {
     if (!this._mapCentredOnce) {
       try {
         const saved = _mmStorageGet('mmMapPos');
-        if (saved) {
-          const { bounds } = JSON.parse(saved);
-        }
+        if (saved) { JSON.parse(saved); } // restore position if available
       } catch (_) {}
       this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
       this._mapCentredOnce = true;
-      // Now that the map is correctly positioned on the person, trigger the
     }
 
     this._updatePersonMarker(state, lat, lng);
@@ -1163,12 +1156,6 @@ class MeerkatMapCardEditor extends HTMLElement {
     root.querySelectorAll('input[data-key]').forEach(el => {
       el.onchange = () => this._updateConfig(el.dataset.key, el.checked);
     });
-
-
-    const clearBtn = root.getElementById('mm-clear-cache-btn');
-    const cacheSizeEl = root.getElementById('mm-cache-size');
-
-    // Populate cache size from IDB record counts.
 
     // Family member search filter
     const familySearch = root.getElementById('mm-family-search');
