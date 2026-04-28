@@ -2036,17 +2036,21 @@ class MeerkatMapCard extends HTMLElement {
   // ── Multi-strategy Overpass fetcher ───────────────────────────────
   async _fetchOverpass(encodedQ, signal) {
     const opts = { signal };
+    const token = this._hass?.auth?.data?.access_token;
+    const proxyOpts = token
+      ? { signal, headers: { 'Authorization': `Bearer ${token}` } }
+      : opts;
     const mirrorUrls = [
       `https://overpass.private.coffee/api/interpreter?data=${encodedQ}`,
     ];
-    const tryFetch = url => {
+    const tryFetch = (url, fetchOpts) => {
       const timeout = new Promise((_, reject) => {
         setTimeout(() => {
           const e = new Error('timeout'); e.code = 'timeout'; reject(e);
         }, 20000);
       });
       return Promise.race([
-        fetch(url, opts)
+        fetch(url, fetchOpts)
           .then(r => {
             if (r.status === 429) {
               const e = new Error('rate_limit'); e.code = 'rate_limit';
@@ -2076,7 +2080,7 @@ class MeerkatMapCard extends HTMLElement {
     for (const url of proxyUrls) {
       if (signal?.aborted) throw new DOMException('', 'AbortError');
       try {
-        return await tryFetch(url);
+        return await tryFetch(url, proxyOpts);
       } catch (ex) {
         if (signal?.aborted) throw new DOMException('', 'AbortError');
         lastErrs.push(ex);
@@ -2115,7 +2119,7 @@ class MeerkatMapCard extends HTMLElement {
     for (const url of mirrorUrls) {
       if (signal?.aborted) throw new DOMException('', 'AbortError');
       try {
-        return await tryFetch(url);
+        return await tryFetch(url, opts);
       } catch (ex) {
         if (signal?.aborted) throw new DOMException('', 'AbortError');
         directErrs.push(ex);
