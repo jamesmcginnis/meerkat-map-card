@@ -1,6 +1,6 @@
 /**
  * Meerkat Map Card
- * Home Assistant custom card — OpenStreetMap with person and device tracking.
+ * Home Assistant custom card — OpenStreetMap with person tracking.
  *
  * Repository: https://github.com/jamesmcginnis/meerkat-map-card
  */
@@ -26,6 +26,13 @@ async function _mmFetchCSS(url) {
   return text;
 }
 
+// ── Persistent storage layer ────────────────────────────────────────
+// IDB schema (version 2) — one object store:
+//
+//   kv           — small key-value pairs only: geocode cache (mmGeo:*) and
+//                  last map position (mmMapPos).  Mirrors to _mmMem for
+//                  synchronous reads; also written to localStorage as a fast
+//                  warm-up path on platforms where IDB open is slow.
 
 const _mmMem = {};
 let   _mmIDB = null;
@@ -37,7 +44,6 @@ function _mmStorageInit() {
   if (_mmInitPromise) return _mmInitPromise;
   _mmInitPromise = new Promise(resolve => {
     // Seed _mmMem from localStorage synchronously for geo/mapPos only.
-    // Only geo cache and map position keys are loaded.
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
@@ -60,8 +66,6 @@ function _mmStorageInit() {
       if (!db.objectStoreNames.contains('kv')) {
         db.createObjectStore('kv');
       }
-
-
     };
 
     req.onerror = () => resolve();
@@ -132,8 +136,6 @@ function _mmStorageRemove(key) {
   try { sessionStorage.removeItem(key); } catch (_) {}
 }
 
-
-
 // ── Tile Layer URLs ────────────────────────────────────────────────
 const MM_TILES = {
   dark:  { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',      attr: '© OpenStreetMap contributors © CARTO' },
@@ -178,6 +180,11 @@ class MeerkatMapCard extends HTMLElement {
     this._tileLayer   = null;
     this._personMarker = null;
     this._familyMarkers = {};   // entityId → Leaflet marker
+    this._geocodeCache = {};
+    this._activeOverlay = null;
+    this._mapInitialised = false;
+    this._mapCentredOnce = false;
+    this._config      = MeerkatMapCard.getStubConfig();
   }
 
   // ── Static ───────────────────────────────────────────────────────
@@ -191,14 +198,27 @@ class MeerkatMapCard extends HTMLElement {
       map_height:          420,
       zoom_level:          15,
       distance_unit:       'metric',
+      person_icon_size:    'medium', // Person marker size: 'small' | 'medium' | 'large'
     };
   }
 
   // ── Config ───────────────────────────────────────────────────────
   setConfig(config) {
     this._config = { ...MeerkatMapCard.getStubConfig(), ...config };
+    // Pre-warm the in-memory caches from IndexedDB / localStorage as early as
+    // possible.
+    this._warmCacheFromStorage().then(() => {
+      if (this._mapInitialised) {
+        this._applyTheme();
+        this._updateMap();
+      }
+    });
   }
 
+  // ── Cache warm-up ─────────────────────────────────────────────────
+  async _warmCacheFromStorage() {
+    await _mmStorageInit();
+  }
 
   // ── Hass ─────────────────────────────────────────────────────────
   set hass(hass) {
@@ -211,7 +231,6 @@ class MeerkatMapCard extends HTMLElement {
   // ── Lifecycle ────────────────────────────────────────────────────
   connectedCallback()    { /* map init happens in set hass */ }
   disconnectedCallback() {
-
     this._closeAllOverlays();
     if (this._map) {
       // Save map position to kv store so it can be restored on reconnect.
@@ -219,9 +238,6 @@ class MeerkatMapCard extends HTMLElement {
         const c = this._map.getCenter();
         const z = this._map.getZoom();
         const payload = { lat: c.lat, lng: c.lng, zoom: z };
-        // Use _mmStorageSet so position is written to both localStorage
-        // (survives full app close/reopen) and sessionStorage (survives
-        // WiFi↔Mobile network switches within the same session).
         _mmStorageSet('mmMapPos', JSON.stringify(payload));
       } catch (_) {}
       this._map.remove();
@@ -230,13 +246,13 @@ class MeerkatMapCard extends HTMLElement {
       this._personMarker = null;  // must null so re-init creates a fresh marker
       this._familyMarkers = {};
     }
-    if (this._flushCacheHandler) {
-      window.removeEventListener('pagehide',        this._flushCacheHandler, { capture: true });
-      window.removeEventListener('visibilitychange', this._flushCacheHandler, { capture: true });
-      window.removeEventListener('beforeunload',     this._flushCacheHandler, { capture: true });
-      this._flushCacheHandler = null;
+    this._mapInitialised  = false;
+    this._mapIniting      = false;  // must reset or re-init is blocked
+    this._suppressMoveend = 0;      // reset or moveend stays suppressed after reconnect
+    if (this._cacheClearedHandler) {
+      window.removeEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
+      this._cacheClearedHandler = null;
     }
-    this._mapCentredOnce = false;
     // Clear shadow DOM so _render() rebuilds the map container on reconnect
     this.shadowRoot.innerHTML = '';
   }
@@ -284,6 +300,8 @@ class MeerkatMapCard extends HTMLElement {
           background: ${bg}; color: ${isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'};
           font-size: 13px; font-weight: 500;
         }
+        /* Leaflet overrides inside shadow root */
+        .leaflet-control-zoom { display: none !important; }
         .mm-spinner {
           width: 28px; height: 28px; border-radius: 50%;
           border: 3px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'};
@@ -291,8 +309,6 @@ class MeerkatMapCard extends HTMLElement {
           animation: mmSpin 0.8s linear infinite;
         }
         @keyframes mmSpin { to { transform: rotate(360deg); } }
-        /* Leaflet overrides inside shadow root */
-        .leaflet-control-zoom { display: none !important; }
         .leaflet-attribution-container a { color: ${accent}; }
       </style>
       <ha-card>
@@ -346,34 +362,17 @@ class MeerkatMapCard extends HTMLElement {
     });
   }
 
+  // ── Zoom helper ───────────────────────────────────────────────────
+  _updateZoomNotice() { /* no-op: zoom notice removed with POI */ }
 
 
   async _initMap() {
     if (this._mapInitialised || this._mapIniting) return;
     this._mapIniting = true;
 
-    // Register the page-hide flush handler BEFORE awaiting Leaflet.
-    this._flushCacheHandler = (evt) => {
-      // Only flush when the page is actually being hidden/killed.
-      // visibilitychange also fires when the app comes back to the foreground
-      // (visibilityState === 'visible') — we must skip that case.
-      if (evt && evt.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
-
-      try {
-        if (this._map) {
-          const c = this._map.getCenter();
-          const z = this._map.getZoom();
-          const payload = { lat: c.lat, lng: c.lng, zoom: z };
-          _mmStorageSet('mmMapPos', JSON.stringify(payload));
-        }
-      } catch (_) {}
-    };
-    window.addEventListener('pagehide',          this._flushCacheHandler, { capture: true });
-    window.addEventListener('visibilitychange',   this._flushCacheHandler, { capture: true });
-    window.addEventListener('beforeunload',       this._flushCacheHandler, { capture: true });
-
     // Kick off IDB warm-up immediately so it runs in parallel with the
     // Leaflet CDN fetch rather than sequentially after it.
+    const warmPromise = this._warmCacheFromStorage();
 
     try {
       // Load Leaflet JS and CSS in parallel.
@@ -419,15 +418,28 @@ class MeerkatMapCard extends HTMLElement {
       }).addTo(this._map);
 
       // Custom panes guarantee DOM z-order regardless of lat-based zIndex math.
+      // sharing entities → device to track (highest).
       this._map.createPane("mmSharingPane"); this._map.getPane("mmSharingPane").style.zIndex = "600";
       this._map.createPane("mmDevicePane");  this._map.getPane("mmDevicePane").style.zIndex  = "700";
 
       this._mapInitialised = true;
       this._mapIniting     = false;
 
+      // Listen for cache-clear events fired by the visual editor so the live
+      // card wipes its in-memory state and removes all POI layers immediately —
+      // without this the editor's localStorage clear has no visible effect.
+      this._cacheClearedHandler = () => {
+        this._geocodeCache = {};
+      };
+      window.addEventListener('meerkat-cache-cleared', this._cacheClearedHandler);
+
       // On iOS, the app can be killed without disconnectedCallback firing.
       // pagehide / visibilitychange / beforeunload are registered above (before
       // the Leaflet await) so the flush fires even if loading is interrupted.
+
+      this._map.on('moveend', () => {
+        this._updateZoomNotice();
+      });
 
       // Hide loading overlay
       const loadEl = this.shadowRoot.getElementById('mm-loading');
@@ -439,14 +451,14 @@ class MeerkatMapCard extends HTMLElement {
         this._map.invalidateSize({ animate: false });
         // Suppress the moveend handler during the initial setView so that
         // centring the map on the person does not schedule a network fetch.
-        // Use a counter (not boolean) so any async moveend firing after the
-        // flag clears is also caught — the counter stays > 0 until the next
         this._suppressMoveend = (this._suppressMoveend || 0) + 1;
         this._updateMap();
         requestAnimationFrame(() => { this._suppressMoveend = Math.max(0, (this._suppressMoveend || 1) - 1); });
+        this._updateZoomNotice();
 
-        // IDB warm-up ran in parallel with Leaflet — just await the already-
-        // in-flight promise.  If it already resolved, .then fires immediately.
+        warmPromise.then(() => {
+          if (!this._mapInitialised || !this._map) return;
+        });
       });
 
     } catch (e) {
@@ -467,13 +479,8 @@ class MeerkatMapCard extends HTMLElement {
     const lng = parseFloat(state.attributes?.longitude);
     if (isNaN(lat) || isNaN(lng)) return;
 
-    // Always centre on the person's current location — never restore the last
-    // map position. This ensures the card opens where the person actually is.
+    // Always centre on the person's current location on first load.
     if (!this._mapCentredOnce) {
-      try {
-        const saved = _mmStorageGet('mmMapPos');
-        if (saved) { JSON.parse(saved); } // restore position if available
-      } catch (_) {}
       this._map.setView([lat, lng], parseInt(this._config.zoom_level) || 15);
       this._mapCentredOnce = true;
     }
@@ -714,75 +721,288 @@ class MeerkatMapCard extends HTMLElement {
     });
   }
 
-  // ── Centre on person ──────────────────────────────────────────────
-  _closeAllOverlays() {
-    if (this._activeOverlay) {
-      this._activeOverlay.remove();
-      this._activeOverlay = null;
-    }
+  _centreOnPerson() {
+    if (!this._hass || !this._config?.person_entity || !this._map) return;
+    const state = this._hass.states[this._config.person_entity];
+    const lat   = parseFloat(state?.attributes?.latitude);
+    const lng   = parseFloat(state?.attributes?.longitude);
+    if (!isNaN(lat) && !isNaN(lng)) this._map.flyTo([lat, lng], parseInt(this._config.zoom_level) || 15, { duration: 1.2 });
   }
 
-  // ── Phone call confirmation sheet ─────────────────────────────────
-  _confirmPhoneCall(phone, placeName, accentColor) {
-    const isDark  = this._isDark();
-    const bg      = isDark ? 'rgba(28,28,30,0.97)' : 'rgba(252,252,254,0.98)';
-    const tx      = isDark ? '#fff' : '#000';
-    const sub     = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)';
-    const bd      = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)';
-    const accent  = accentColor || '#007AFF';
+  // ── Zone helper ───────────────────────────────────────────────────
+  _getZone(state) {
+    const s = (state?.state || '').toLowerCase();
+    if (s === 'home') return 'home';
+    if (s === 'not_home' || s === 'away') return 'not_home';
+    return s || 'unknown';
+  }
+
+  _getZoneLabel(state) {
+    const s = state?.state || 'unknown';
+    if (s === 'home') return 'Home';
+    if (s === 'not_home') return 'Away';
+    // Match against zone entity ID slug: zone.work → "work"
+    const zones = Object.entries(this._hass?.states || {})
+      .filter(([k]) => k.startsWith('zone.'));
+    const match = zones.find(([k, v]) => {
+      const slug = k.replace('zone.', '').replace(/_/g, ' ');
+      return slug.toLowerCase() === s.toLowerCase()
+        || (v.attributes?.friendly_name || '').toLowerCase() === s.toLowerCase();
+    });
+    if (match) return match[1].attributes?.friendly_name || s;
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  // ── Reverse geocode ───────────────────────────────────────────────
+  async _reverseGeocode(lat, lng, skipSensor) {
+    // Prefer HA geocoded sensor — has full address including house number.
+    // Only use it for the main person (skipSensor=true bypasses it for family members).
+    if (!skipSensor) {
+      const geoEnt = this._config.geocoded_entity;
+      if (geoEnt && this._hass && this._hass.states[geoEnt]) {
+        const st = this._hass.states[geoEnt].state;
+        if (st && st !== 'unknown' && st !== 'unavailable') return st;
+      }
+    }
+    const key = `v10:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    // 1. Check in-memory cache first (fastest)
+    if (this._geocodeCache[key]) return this._geocodeCache[key];
+    // 2. Check localStorage — avoids a network round-trip on page reload
+    try {
+      const stored = _mmStorageGet(`mmGeo:${key}`);
+      if (stored) {
+        this._geocodeCache[key] = stored;
+        return stored;
+      }
+    } catch (_) {}
+    // 3. No cached data at this map reference — fetch from Nominatim
+    try {
+      const _p = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const r  = await fetch(`${_p}//nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=en`);
+      const d  = await r.json();
+      const a  = d.address || {};
+      var houseNum = a.house_number || '';
+      if (!houseNum && d.display_name) {
+        var seg = d.display_name.split(',')[0].trim();
+        if (/^[0-9]+[A-Za-z]?$/.test(seg)) houseNum = seg;
+      }
+      const street = [houseNum, a.road].filter(Boolean).join(' ');
+      const parts = [street||null, a.suburb||a.quarter||a.neighbourhood||null,
+        a.town||a.city||a.village||a.county||null, a.postcode||null].filter(Boolean);
+      const result = parts.join(', ') || d.display_name || 'Unknown location';
+      this._geocodeCache[key] = result;
+      // Persist to localStorage so subsequent page loads skip the API call
+      _mmStorageSet(`mmGeo:${key}`, result);
+      return result;
+    } catch { return 'Location unavailable'; }
+  }
+
+  // ── Distance calculation ──────────────────────────────────────────
+  _distanceTo(lat1, lng1, lat2, lng2) {
+    const R = 6371000; // metres
+    const dLat = (lat2-lat1) * Math.PI/180;
+    const dLng = (lng2-lng1) * Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    const metres = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const unit = this._config.distance_unit || 'metric';
+    if (unit === 'imperial') {
+      const miles = metres / 1609.344;
+      return miles < 0.1 ? `${Math.round(metres * 1.09361)} yd` : `${miles.toFixed(1)} mi`;
+    }
+    if (unit === 'mixed') {
+      // Miles for distance, metres for short distances
+      const miles = metres / 1609.344;
+      return miles < 0.1 ? `${Math.round(metres)} m` : `${miles.toFixed(1)} mi`;
+    }
+    return metres < 1000 ? `${Math.round(metres)} m` : `${(metres/1000).toFixed(1)} km`;
+  }
+
+  // ── Person info popup ─────────────────────────────────────────────
+  async _openPersonPopup(state, lat, lng) {
+    this._closeAllOverlays();
+    const isDark   = this._isDark();
+    const accent   = '#007AFF';
+    const zone     = this._getZone(state);
+    const zoneLabel = this._getZoneLabel(state);
+    const zoneColor = zone === 'home' ? '#34C759' : zone === 'not_home' ? '#FF9500' : accent;
+    const name     = state.attributes?.friendly_name || state.entity_id;
+    const picUrl   = state.attributes?.entity_picture || '';
+    const lastChanged = state.last_changed || state.last_updated;
+    const timeAgo  = _mmTimeAgo(lastChanged);
+    const sourceState = (() => {
+      const src = state.attributes?.source;
+      return src ? this._hass?.states[src] : null;
+    })();
+    const battery  = state.attributes?.battery_level ?? state.attributes?.battery
+                  ?? sourceState?.attributes?.battery_level ?? sourceState?.attributes?.battery ?? null;
+    const accuracy = state.attributes?.gps_accuracy ?? null;
+
+    const bgBase   = isDark ? '28,28,30' : '252,252,254';
+    const popupBg  = isDark ? `rgba(${bgBase},0.94)` : `rgba(${bgBase},0.96)`;
+    const textCol  = isDark ? '#fff' : '#000';
+    const subCol   = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)';
+    const borderC  = isDark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.08)';
+    const rowBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
 
     const overlay = document.createElement('div');
-    overlay.style.cssText = [
-      'position:fixed;inset:0;z-index:999999',
-      'display:flex;align-items:flex-end;justify-content:center;padding:0 0 24px',
-      'background:rgba(0,0,0,0.5)',
-      'backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)',
-      'animation:mmFadeIn 0.2s ease',
-    ].join(';');
+    overlay.style.cssText = `position:fixed;inset:0;z-index:99999;display:flex;align-items:flex-end;justify-content:center;padding:0 0 16px;background:rgba(0,0,0,0.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);animation:mmFadeIn 0.2s ease;`;
 
-    const styleEl = document.createElement('style');
-    styleEl.textContent = `@keyframes mmFadeIn{from{opacity:0}to{opacity:1}}@keyframes mmSlideUp{from{transform:translateY(24px) scale(0.97);opacity:0}to{transform:none;opacity:1}}`;
-    overlay.appendChild(styleEl);
-
-    const panel = document.createElement('div');
-    panel.style.cssText = [
-      `background:${bg}`,
-      'backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%)',
-      `border:1px solid ${bd}`,
-      'border-radius:24px',
-      'padding:28px 24px 20px',
-      'width:calc(100% - 32px);max-width:380px',
-      `font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;color:${tx}`,
-      'animation:mmSlideUp 0.28s cubic-bezier(0.34,1.3,0.64,1)',
-      'text-align:center',
-    ].join(';');
-
-    panel.innerHTML = `
-      <div style="font-size:40px;margin-bottom:12px;">📞</div>
-      <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-bottom:6px;">${placeName}</div>
-      <div style="font-size:22px;font-weight:600;color:${accent};margin-bottom:6px;letter-spacing:0.5px;">${phone}</div>
-      <div style="font-size:13px;color:${sub};margin-bottom:24px;">Call this number?</div>
-      <a href="tel:${phone}" id="mm-call-yes"
-        style="display:block;width:100%;padding:14px;border:none;border-radius:14px;background:${accent};color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;font-family:inherit;text-decoration:none;box-sizing:border-box;">
-        Call
-      </a>
-      <button id="mm-call-no"
-        style="display:block;width:100%;padding:14px;border:none;border-radius:14px;background:${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)'};color:${tx};font-size:16px;font-weight:500;cursor:pointer;font-family:inherit;">
-        Cancel
-      </button>
+    const style = document.createElement('style');
+    style.textContent = MM_POPUP_KEYFRAMES + `
+      .mm-popup { animation: mmSlideUp 0.28s cubic-bezier(0.34,1.3,0.64,1); }
+      .mm-info-row { display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid ${rowBorder}; }
+      .mm-info-row:last-child { border-bottom:none; }
+      .mm-info-label { font-size:12px;color:${subCol};font-weight:500; }
+      .mm-info-value { font-size:13px;font-weight:600;color:${textCol};text-align:right;max-width:200px;word-break:break-word; }
     `;
+    overlay.appendChild(style);
 
-    overlay.appendChild(panel);
+    const popup = document.createElement('div');
+    popup.className = 'mm-popup';
+    popup.style.cssText = `background:${popupBg};backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:1px solid ${borderC};border-radius:24px 24px 20px 20px;box-shadow:0 -8px 48px rgba(0,0,0,0.5),0 0 0 0.5px ${borderC};padding:0 0 4px;width:100%;max-width:440px;max-height:82vh;overflow-y:auto;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',sans-serif;color:${textCol};`;
+    popup.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+    popup.addEventListener('click', e => e.stopPropagation());
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:14px;padding:10px 20px 14px;';
+    header.innerHTML = `
+      <div id="mm-person-avatar" style="width:54px;height:54px;border-radius:50%;overflow:hidden;border:3px solid ${zoneColor};flex-shrink:0;background:${isDark ? '#2c2c2e' : '#e0e0e0'};display:flex;align-items:center;justify-content:center;cursor:pointer;" title="Fly to ${name}">
+        ${picUrl ? `<img src="${picUrl}" style="width:100%;height:100%;object-fit:cover;" alt="${name}">` : `<span style="font-size:22px;font-weight:700;color:${zoneColor};">${(name[0]||'?').toUpperCase()}</span>`}
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;">${name}</div>
+      </div>
+      <button id="mm-popup-close" style="background:${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)'};border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:${subCol};font-size:16px;flex-shrink:0;transition:background 0.15s;">✕</button>`;
+
+    // Info rows
+    const infoWrap = document.createElement('div');
+    infoWrap.style.cssText = 'padding:4px 20px 12px;';
+
+    const addRow = (label, value) => {
+      if (!value && value !== 0) return;
+      infoWrap.innerHTML += `<div class="mm-info-row"><span class="mm-info-label">${label}</span><span class="mm-info-value">${value}</span></div>`;
+    };
+
+    addRow('Last updated', timeAgo);
+    if (accuracy !== null) addRow('GPS accuracy', `±${Math.round(accuracy)} m`);
+    if (battery   !== null) addRow('Battery', `${Math.round(battery)}%`);
+    addRow('Coordinates', `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+
+    // Geocode placeholder
+    const geoRow = document.createElement('div');
+    geoRow.className = 'mm-info-row';
+    geoRow.innerHTML = `<span class="mm-info-label">Address</span><span class="mm-info-value" style="color:${subCol};font-style:italic;">Loading…</span>`;
+    infoWrap.appendChild(geoRow);
+
+    popup.appendChild(header);
+    popup.appendChild(infoWrap);
+
+    // ── Family members section ────────────────────────────────────
+    const members = Array.isArray(this._config?.family_members) ? this._config.family_members : [];
+    if (members.length > 0) {
+      const divider = document.createElement('div');
+      divider.style.cssText = `margin:0 20px;height:1px;background:${rowBorder};`;
+      popup.appendChild(divider);
+
+      const familySection = document.createElement('div');
+      familySection.style.cssText = 'padding:12px 20px 16px;';
+
+      const sectionHead = document.createElement('div');
+      sectionHead.style.cssText = `font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:${subCol};margin-bottom:10px;`;
+      sectionHead.textContent = 'Sharing';
+      familySection.appendChild(sectionHead);
+
+      const memberRows = document.createElement('div');
+      memberRows.style.cssText = 'display:flex;flex-direction:column;gap:0;';
+
+      members.forEach((entityId, i) => {
+        const mState  = this._hass?.states[entityId];
+        if (!mState) return;
+        const mName   = mState.attributes?.friendly_name || entityId;
+        const mPicUrl = mState.attributes?.entity_picture || '';
+        const mZone   = this._getZone(mState);
+        const mColor  = mZone === 'home' ? '#34C759' : mZone === 'not_home' ? '#FF9500' : '#AF52DE';
+        const mLat    = parseFloat(mState.attributes?.latitude);
+        const mLng    = parseFloat(mState.attributes?.longitude);
+        const hasMPos = !isNaN(mLat) && !isNaN(mLng);
+        const distStr = hasMPos ? this._distanceTo(lat, lng, mLat, mLng) : null;
+
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex;align-items:center;gap:12px;padding:10px 0;cursor:pointer;border-radius:10px;transition:background 0.15s;${i > 0 ? 'border-top:1px solid ' + rowBorder + ';' : ''}`;
+        row.addEventListener('mouseenter', () => row.style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)');
+        row.addEventListener('mouseleave', () => row.style.background = 'transparent');
+
+        const avatar = document.createElement('div');
+        avatar.style.cssText = `width:38px;height:38px;border-radius:50%;overflow:hidden;border:2px solid ${mColor};flex-shrink:0;background:${isDark ? '#2c2c2e' : '#e0e0e0'};display:flex;align-items:center;justify-content:center;`;
+        avatar.innerHTML = mPicUrl
+          ? `<img src="${mPicUrl}" style="width:100%;height:100%;object-fit:cover;" alt="${mName}">`
+          : `<span style="font-size:15px;font-weight:700;color:${mColor};">${(mName[0]||'?').toUpperCase()}</span>`;
+
+        const info = document.createElement('div');
+        info.style.cssText = 'flex:1;min-width:0;';
+        info.innerHTML = `<div style="font-size:14px;font-weight:600;color:${textCol};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${mName}</div>`;
+
+        // Address placeholder + distance
+        const addrLine = document.createElement('div');
+        addrLine.style.cssText = `font-size:11px;color:${subCol};margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+        addrLine.textContent = 'Loading address…';
+        info.appendChild(addrLine);
+
+        if (hasMPos) {
+          this._reverseGeocode(mLat, mLng, true).then(addr => {
+            addrLine.textContent = addr;
+          });
+        } else {
+          addrLine.textContent = 'Location unavailable';
+        }
+
+        const meta = document.createElement('div');
+        meta.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;';
+        if (distStr) {
+          meta.innerHTML = `<span style="font-size:13px;font-weight:700;color:${textCol};">${distStr}</span>`;
+        }
+        // Chevron
+        meta.innerHTML += `<svg viewBox="0 0 24 24" width="14" height="14" style="opacity:0.35;"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z" fill="${textCol}"/></svg>`;
+
+        row.appendChild(avatar);
+        row.appendChild(info);
+        row.appendChild(meta);
+        memberRows.appendChild(row);
+
+        if (hasMPos) {
+          row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._closeAllOverlays();
+            this._map.flyTo([mLat, mLng], parseInt(this._config.zoom_level) || 15, { duration: 1.4 });
+          });
+        }
+      });
+
+      familySection.appendChild(memberRows);
+      popup.appendChild(familySection);
+    }
+
+    overlay.appendChild(popup);
     document.body.appendChild(overlay);
+    this._activeOverlay = overlay;
 
-    const close = () => overlay.remove();
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    panel.querySelector('#mm-call-no').addEventListener('click', close);
-    // The <a> tag handles the actual tel: navigation natively; just close the sheet after.
-    panel.querySelector('#mm-call-yes').addEventListener('click', () => {
-      setTimeout(close, 300);
+    overlay.addEventListener('click', () => this._closeAllOverlays());
+    popup.querySelector('#mm-popup-close').addEventListener('click', () => this._closeAllOverlays());
+    popup.querySelector('#mm-person-avatar').addEventListener('click', () => {
+      this._closeAllOverlays();
+      this._map.flyTo([lat, lng], parseInt(this._config.zoom_level) || 15, { duration: 1.2 });
     });
+
+    // Geocode async — own address
+    this._reverseGeocode(lat, lng).then(addr => {
+      const valEl = geoRow.querySelector('.mm-info-value');
+      if (valEl) { valEl.textContent = addr; valEl.style.fontStyle = 'normal'; valEl.style.color = textCol; }
+    });
+
   }
+
+
 
 }
 
@@ -986,7 +1206,6 @@ class MeerkatMapCardEditor extends HTMLElement {
           </div>
         </div>
 
-
       </div>`;
 
     this._setupListeners();
@@ -1153,10 +1372,6 @@ class MeerkatMapCardEditor extends HTMLElement {
 
     root.querySelectorAll('input[name="person_icon_size"]').forEach(r => r.onchange = () => this._updateConfig('person_icon_size', r.value));
 
-    root.querySelectorAll('input[data-key]').forEach(el => {
-      el.onchange = () => this._updateConfig(el.dataset.key, el.checked);
-    });
-
     // Family member search filter
     const familySearch = root.getElementById('mm-family-search');
     if (familySearch) {
@@ -1204,6 +1419,6 @@ if (!window.customCards.some(c => c.type === 'meerkat-map-card')) {
     type:        'meerkat-map-card',
     name:        'Meerkat Map Card',
     preview:     false,
-    description: 'Interactive OpenStreetMap card with person and device tracking.',
+    description: 'Interactive OpenStreetMap card with person tracking.',
   });
 }
