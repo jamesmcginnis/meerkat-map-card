@@ -6,8 +6,6 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=meerkat-map-card&category=plugin)
 
-![Preview](preview.png)
-
 -----
 
 ## Features
@@ -15,19 +13,12 @@ A custom Home Assistant Lovelace card that tracks a person entity on a live Open
 - **Live person tracking** — animated pulsing marker, colour-coded by zone (green = home, orange = away)
 - **Person popup** — tap the marker to see last updated time, GPS accuracy, battery, full address, and coordinates
 - **Sharing** — track additional people, devices, or any GPS entity alongside yourself; each appears as its own marker with its current address and distance from you
-- **Points of interest** — 53 categories across 8 groups, fetched from OpenStreetMap via Overpass API
-- **Persistent POI caching** — all fetched POIs accumulate across every area you visit; panning, zooming, navigating away, or fully closing and reopening the app never causes previously loaded markers to disappear — revisiting any location restores markers instantly from cache with no network request
-- **POI zoom gate** — POIs are only loaded when zoomed in to level 13 or above; a notice appears when zoomed out too far, and existing cached markers are hidden until you zoom back in
-- **POI status ring** — indicator beneath the map controls showing loading, success, and error states with a centre button to stop or refresh
-- **POI popup** — tap any POI to see name, category, address, distance from person, opening hours, phone (tap to call — a styled confirmation sheet appears before dialling), website (icon clickable), and any available extra details such as cuisine, wheelchair access, fees, operator, brand, and network
 - **Distance measurement** — choose metric (km/m), miles with metres (mi/m), or imperial (mi/yd) in the visual editor
 - **Geocoded address** — link a `sensor.*_geocoded_location` entity (HA companion app) for full address including house number
 - **Dark / Light / Auto theme**
-- **POI icon size** — Small, Medium, or Large marker size for POIs
 - **Person icon size** — Small, Medium, or Large marker size for the tracked person and shared entities
-- **POI quick-select** — tap the map pin button on the map to toggle points of interest directly without opening the editor
 - **Full visual editor** — no YAML required
-- **iOS compatible** — works in the HA companion app on iPhone and iPad with the proxy integration (see below)
+- **iOS compatible** — works in the HA companion app on iPhone and iPad
 
 -----
 
@@ -53,35 +44,6 @@ Click the button above, or:
 
 -----
 
-## iOS Setup — Points of Interest
-
-> ⚠️ **iPhone and iPad users:** The iOS Home Assistant companion app blocks direct requests to external APIs including the Overpass API used for POI data. Without the steps below, points of interest will not load on any iPhone or iPad that does not already have them cached.
-
-To fix this, install the **Home Assistant Web Proxy** integration. It routes Overpass requests through your HA server so the browser never touches external APIs directly. The card always tries the proxy first on all platforms — if it is not installed or unreachable, the card falls back to direct connections automatically. No card configuration is needed.
-
-### Step 1 — Install the proxy integration via HACS
-
-1. In HACS → **Integrations** (not Frontend), click the three-dot menu → **Custom repositories**
-1. Add `https://github.com/dermotduffy/hass-web-proxy-integration` with category **Integration**
-1. Install **Home Assistant Web Proxy**
-1. Restart Home Assistant
-
-### Step 2 — Add the Overpass URL patterns
-
-The card tries three Overpass mirrors in sequence and uses the first one that responds successfully. Add all three to ensure the fastest possible fallback:
-
-1. Settings → Devices & Services → find **Home Assistant Web Proxy** → **Configure**
-1. Click **+ ADD** and enter `https://overpass-api.de/*`
-1. Click **+ ADD** again and enter `https://overpass.private.coffee/*`
-1. Click **+ ADD** again and enter `https://overpass.osm.ch/*`
-1. Click **Save**
-
-No restart needed after step 2.
-
-> **Why three mirrors?** Each is an independent Overpass server in a different location. The card tries them in sequence — if the primary mirror is rate-limited, busy, or unreachable, it falls back to the next automatically.
-
------
-
 ## Configuration
 
 The card has a full visual editor — click the pencil icon after adding it to a dashboard. You can also configure it directly in YAML:
@@ -97,14 +59,7 @@ theme: dark
 map_height: 420
 zoom_level: 15
 distance_unit: metric
-cache_ttl_hours: 48
-poi_icon_size: medium
 person_icon_size: medium
-show_train_stations: true
-show_bus_stops: true
-show_hospitals: true
-show_pharmacies: true
-show_supermarkets: true
 ```
 
 ### Options
@@ -118,11 +73,7 @@ show_supermarkets: true
 | `map_height`        | number | `420`    | Height of the map in pixels                                                            |
 | `zoom_level`        | number | `15`     | Default zoom level (1–20)                                                              |
 | `distance_unit`     | string | `metric` | Distance units: `metric` (km/m), `mixed` (mi/m), or `imperial` (mi/yd)                |
-| `cache_ttl_hours`   | number | `48`     | How long POI data is cached before a refresh is needed (hours)                         |
-| `poi_icon_size`     | string | `medium` | Size of POI markers: `small`, `medium`, or `large`                                     |
 | `person_icon_size`  | string | `medium` | Size of person and shared entity markers: `small`, `medium`, or `large`                |
-
-For a full list of the 53 POI `show_*` keys, see the visual editor.
 
 -----
 
@@ -144,84 +95,9 @@ In the editor, the Sharing list shows all entities with GPS coordinates, with a 
 
 -----
 
-## Points of Interest
-
-> ⚠️ **Performance note:** Enable only a small number of POI categories at once, especially on mobile. Each batch of up to 5 categories uses one network request — enabling more increases load time.
-
-> ⚠️ **Zoom note:** POIs are only fetched and displayed when zoomed in to level 13 or above. A notice appears on the map when you are zoomed out too far. Existing cached markers are hidden until you zoom back in.
-
-POI data is fetched from [OpenStreetMap](https://www.openstreetmap.org/) via the [Overpass API](https://overpass-api.de/) and stored in a persistent local cache using IndexedDB. The cache is cumulative — every POI fetched across every area you visit is accumulated and never discarded when you pan, zoom, navigate away, or fully close and reopen the app. Returning to any previously visited location restores all markers instantly from cache with no network request and no loading indicator. The cache duration is configurable in the visual editor (default 48 hours — recommended).
-
-The card includes several optimisations to minimise load time and network usage:
-
-- All fetched POIs accumulate in a persistent IndexedDB cache — panning and zooming never causes markers to disappear
-- Up to 5 categories are batched into a single network request
-- Three Overpass mirrors are tried in sequence — if one fails or is rate-limited, the next is used automatically
-- Each mirror has a 20-second timeout so a slow server never blocks the others
-- A 25% expanded area is fetched on first load so short pans are already cached
-- Zooming in never triggers a refetch — the data is already loaded
-- A 2.5-second pause after panning avoids wasted fetches mid-drag
-- Panning to a new area cancels any in-flight requests for the old location
-- Navigating away and returning, or fully closing and reopening the app, restores all markers instantly from cache with no network request
-
-The 53 categories are organised into 8 groups in the visual editor:
-
-- **Food & Drink** — Restaurants, Cafés, Pubs, Bars, Fast Food, Ice Cream
-- **Shops & Services** — Supermarkets, Shops, Bakeries, Hairdressers, Post Offices, Post Boxes
-- **Transport** — Train Stations, Bus Stops, Petrol Stations, Car Parks, EV Charging, Bike Parking, Taxi Ranks, Ferry Terminals
-- **Health & Emergency** — Hospitals, Pharmacies, Doctors / GPs, Dentists, Vets, Police Stations, Fire Stations
-- **Finance** — ATMs, Banks, Currency Exchange
-- **Education & Culture** — Schools, Colleges, Universities, Libraries, Theatres, Cinemas, Museums, Arts Centres, Places of Worship, Community Centres
-- **Recreation** — Parks, Playgrounds, Sports Centres, Swimming Pools, Golf Courses, Hotels, Attractions, Viewpoints, Campsites
-- **Utilities & Environment** — Toilets, Drinking Water, Benches, Recycling
-
-**Enabled by default:** Train Stations, Bus Stops, Hospitals, Pharmacies, Supermarkets.
-
------
-
-## POI Status Ring
-
-A small ring beneath the map controls in the top-right corner of the map shows the current state of POI data loading:
-
-| State       | Colour            | Meaning                                       |
-|-------------|-------------------|-----------------------------------------------|
-| **Idle**    | White             | Data loaded and up to date                    |
-| **Loading** | Yellow, breathing | Fetching data from Overpass                   |
-| **Success** | Green, pulsing    | Data loaded successfully                      |
-| **Error**   | Red, fades to white | Fetch failed — tap the centre button to retry |
-
-The centre button changes depending on state — a stop icon while loading, a refresh icon otherwise. Tapping the refresh button shows a confirmation prompt; confirming clears the entire local POI cache and downloads fresh data from OpenStreetMap.
-
------
-
-## Cache Settings
-
-The visual editor includes a **Cache Settings** section with two options:
-
-**Cache Duration** — controls how long POI data is kept before the card considers it stale. Options range from 6 hours to 12 months. The default of 48 hours is recommended: POIs like bus stops, hospitals, and shops change very rarely, so there is no benefit to fetching them more frequently.
-
-**Clear All Cached POI Data** — removes all saved POI data from the device immediately. The current cache size is shown directly below the button (e.g. *184.3 KB across 12 stored regions*) so you can see exactly how much is stored before clearing.
-
------
-
 ## Person Popup
 
 Tap the person marker to see last updated time, GPS accuracy, battery, coordinates, and full address. If you have any entities configured in **Sharing**, a section at the bottom lists each one with its current address and distance from you — tap any row to fly the map to their location.
-
------
-
-## POI Popup
-
-Tap any POI marker to open a popup showing all available information from OpenStreetMap, including:
-
-- Name and category
-- Address
-- Distance from the tracked person
-- Opening hours
-- Phone number — tap to open a confirmation sheet, then call directly
-- Website — tap the icon in the header to open in a new tab
-- Cuisine type, wheelchair access, fees, operator, brand, network, and reference where available
-- Coordinates
 
 -----
 
@@ -236,9 +112,7 @@ Without this option the card falls back to [Nominatim](https://nominatim.openstr
 ## Privacy
 
 - Map tiles are loaded from [CARTO](https://carto.com/) (OpenStreetMap data)
-- POI data is fetched from the [Overpass API](https://overpass-api.de/) and two public mirrors — only the visible map bounding box is sent, no personal data
-- Address fallback uses [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
-- POI results are stored in your browser's **IndexedDB** only — nothing is sent to any third party beyond the API calls above
+- Address lookups use [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)
 - No analytics, no accounts, no tracking
 
 -----
@@ -247,10 +121,9 @@ Without this option the card falls back to [Nominatim](https://nominatim.openstr
 
 - Home Assistant 2023.1.0 or later
 - A `person` entity or device tracker with `latitude` and `longitude` attributes
-- For POI loading on iPhone and iPad: [Home Assistant Web Proxy](https://github.com/dermotduffy/hass-web-proxy-integration) (free HACS integration)
 
 -----
 
 ## License
 
-MIT — see <LICENSE.md>
+MIT — see LICENSE.md
