@@ -2038,8 +2038,6 @@ class MeerkatMapCard extends HTMLElement {
     const opts = { signal };
     const mirrorUrls = [
       `https://overpass.private.coffee/api/interpreter?data=${encodedQ}`,
-      `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
-      `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
     ];
     const tryFetch = url => {
       const timeout = new Promise((_, reject) => {
