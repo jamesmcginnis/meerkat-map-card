@@ -2037,9 +2037,9 @@ class MeerkatMapCard extends HTMLElement {
   async _fetchOverpass(encodedQ, signal) {
     const opts = { signal };
     const mirrorUrls = [
-      `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
       `https://overpass.private.coffee/api/interpreter?data=${encodedQ}`,
-      `https://overpass.osm.ch/api/interpreter?data=${encodedQ}`,
+      `https://overpass.kumi.systems/api/interpreter?data=${encodedQ}`,
+      `https://overpass-api.de/api/interpreter?data=${encodedQ}`,
     ];
     const tryFetch = url => {
       const timeout = new Promise((_, reject) => {
