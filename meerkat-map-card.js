@@ -2035,114 +2035,58 @@ class MeerkatMapCard extends HTMLElement {
 
   // ── Multi-strategy Overpass fetcher ───────────────────────────────
   async _fetchOverpass(encodedQ, signal) {
-    const opts = { signal };
-    let proxyOpts = opts;
-    try {
-      const hassTokens = JSON.parse(localStorage.getItem('hassTokens') || '{}');
-      const token = hassTokens.access_token || this._hass?.auth?.data?.access_token;
-      if (token) proxyOpts = { signal, headers: { 'Authorization': `Bearer ${token}` } };
-    } catch (_) {}
-    const mirrorUrls = [
-      `https://overpass.private.coffee/api/interpreter?data=${encodedQ}`,
-    ];
-    const tryFetch = (url, fetchOpts) => {
+    const overpassUrl = `https://overpass.private.coffee/api/interpreter?data=${encodedQ}`;
+
+    const doFetch = async (url, fetchOpts) => {
       const timeout = new Promise((_, reject) => {
-        setTimeout(() => {
-          const e = new Error('timeout'); e.code = 'timeout'; reject(e);
-        }, 20000);
+        setTimeout(() => { const e = new Error('timeout'); e.code = 'timeout'; reject(e); }, 20000);
       });
       return Promise.race([
-        fetch(url, fetchOpts)
-          .then(r => {
-            if (r.status === 429) {
-              const e = new Error('rate_limit'); e.code = 'rate_limit';
-              e.retryAfter = parseInt(r.headers.get('Retry-After') || '60');
-              throw e;
-            }
-            if (r.status === 503 || r.status === 504) {
-              const e = new Error('busy'); e.code = 'busy'; throw e;
-            }
-            if (!r.ok) { const e = new Error(String(r.status)); e.code = 'http_error'; throw e; }
-            return r.json().then(d => d.elements || []);
-          }),
+        fetch(url, fetchOpts).then(r => {
+          if (r.status === 429) { const e = new Error('rate_limit'); e.code = 'rate_limit'; e.retryAfter = parseInt(r.headers.get('Retry-After') || '60'); throw e; }
+          if (r.status === 503 || r.status === 504) { const e = new Error('busy'); e.code = 'busy'; throw e; }
+          if (!r.ok) { const e = new Error(String(r.status)); e.code = 'http_error'; throw e; }
+          return r.json().then(d => d.elements || []);
+        }),
         timeout
       ]);
     };
 
-    // Build proxy-wrapped URLs (routes through HA so same-origin on iOS)
-    const proxyUrls = mirrorUrls.map(
-      u => `/api/hass_web_proxy/v0/?url=${encodeURIComponent(u)}`
-    );
-
-    // Try mirrors sequentially rather than racing them all at once.
-    // Racing all three means every request costs 3× the API quota — exactly
-    // what causes the "Request Limit reached" errors with many categories.
-    // Sequential: try the primary mirror first; only fall back if it fails.
-    const lastErrs = [];
-    for (const url of proxyUrls) {
-      if (signal?.aborted) throw new DOMException('', 'AbortError');
+    // ── Strategy 1: dynamic proxy via hass_web_proxy.create_proxied_url ──
+    // Uses the existing authenticated WebSocket connection — no auth headers needed.
+    if (this._hass) {
+      let urlId = null;
       try {
-        return await tryFetch(url, proxyOpts);
+        if (signal?.aborted) throw new DOMException('', 'AbortError');
+        const result = await this._hass.callService(
+          'hass_web_proxy', 'create_proxied_url',
+          { url_pattern: 'https://overpass.private.coffee/*', ttl: 30 },
+          undefined, true
+        );
+        urlId = result?.url_id;
+        if (signal?.aborted) throw new DOMException('', 'AbortError');
+        const proxiedUrl = `/api/hass_web_proxy/v0/?url=${encodeURIComponent(overpassUrl)}`;
+        const elements = await doFetch(proxiedUrl, { signal });
+        return elements;
       } catch (ex) {
         if (signal?.aborted) throw new DOMException('', 'AbortError');
-        lastErrs.push(ex);
-        // Rate-limited on this mirror — wait a moment then try the next one
-        if (ex?.code === 'rate_limit' || ex?.code === 'busy') {
-          await new Promise(r => setTimeout(r, 1500));
-          continue;
+        // If the service doesn't exist or fails, fall through to direct fetch
+        if (ex?.code !== 'http_error' && ex?.code !== 'timeout' && ex?.code !== 'rate_limit' && ex?.code !== 'busy') {
+          // Service call failed (not installed, etc.) — fall through silently
+        } else {
+          throw ex;
         }
-        // Timeout on this mirror — try the next immediately
-        if (ex?.code === 'timeout') continue;
-        // Network/proxy error (proxy not installed, CORS, etc.) — fall through
-        // to direct connections rather than trying other proxy URLs for the same error
-        break;
+      } finally {
+        // Always clean up the dynamic proxy URL
+        if (urlId && this._hass) {
+          try { await this._hass.callService('hass_web_proxy', 'delete_proxied_url', { url_id: urlId }); } catch (_) {}
+        }
       }
     }
 
+    // ── Strategy 2: direct fetch (works on desktop; CORS-blocked on iOS) ──
     if (signal?.aborted) throw new DOMException('', 'AbortError');
-
-    // Check if proxy errors were all meaningful (rate limit / busy / timeout)
-    // If so, re-throw the aggregate — direct mirrors will give the same response.
-    const codes = lastErrs.map(ex => ex?.code).filter(Boolean);
-    const allMeaningful = codes.length > 0 && codes.every(
-      c => c === 'busy' || c === 'rate_limit' || c === 'timeout'
-    );
-    if (allMeaningful && codes.length === proxyUrls.length) {
-      // Propagate the most actionable error (rate_limit > busy > timeout)
-      const best = lastErrs.find(e => e?.code === 'rate_limit')
-                || lastErrs.find(e => e?.code === 'busy')
-                || lastErrs[lastErrs.length - 1];
-      throw best;
-    }
-
-    // Fallback: try direct connections sequentially (works on desktop;
-    // may be blocked on iOS without the proxy add-on).
-    const directErrs = [];
-    for (const url of mirrorUrls) {
-      if (signal?.aborted) throw new DOMException('', 'AbortError');
-      try {
-        return await tryFetch(url, opts);
-      } catch (ex) {
-        if (signal?.aborted) throw new DOMException('', 'AbortError');
-        directErrs.push(ex);
-        if (ex?.code === 'rate_limit' || ex?.code === 'busy') {
-          await new Promise(r => setTimeout(r, 1500));
-          continue;
-        }
-        if (ex?.code === 'timeout') continue;
-        // Network/CORS error on this mirror — try the next one rather than giving up,
-        // since each direct mirror is an independent server and others may still work.
-        continue;
-      }
-    }
-
-    // All mirrors failed — throw the most actionable error
-    const allErrs = [...lastErrs, ...directErrs];
-    const best = allErrs.find(e => e?.code === 'rate_limit')
-              || allErrs.find(e => e?.code === 'busy')
-              || allErrs[allErrs.length - 1]
-              || new Error('all mirrors failed');
-    throw best;
+    return doFetch(overpassUrl, { signal });
   }
 
     _renderPOILayer(cat, elements) {
